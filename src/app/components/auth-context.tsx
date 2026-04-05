@@ -1,4 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { supabase } from "./supabase-client";
+import type { User, Session } from "@supabase/supabase-js";
 
 interface AuthUser {
   id: string;
@@ -15,39 +17,15 @@ interface AuthContextType {
   signOut: () => Promise<void>;
 }
 
-// Create context with default value to prevent multiple instance issues
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  accessToken: null,
-  loading: true,
-  signIn: async () => ({ error: "Not initialized" }),
-  signUp: async () => ({ error: "Not initialized" }),
-  signOut: async () => {},
-});
+const AuthContext = createContext<AuthContextType | null>(null);
 
-const STORAGE_KEY = "mock_auth_user";
-const USERS_DB_KEY = "mock_users_db";
-
-interface UserRecord {
-  email: string;
-  password: string;
-  name: string;
-  id: string;
-}
-
-function getUsersDB(): UserRecord[] {
-  try {
-    const raw = localStorage.getItem(USERS_DB_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveUsersDB(users: UserRecord[]) {
-  try {
-    localStorage.setItem(USERS_DB_KEY, JSON.stringify(users));
-  } catch { /* ignore */ }
+function toAuthUser(user: User | null, session: Session | null): AuthUser | null {
+  if (!user) return null;
+  return {
+    id: user.id,
+    email: user.email || "",
+    name: user.user_metadata?.full_name || user.email?.split("@")[0] || "",
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -56,15 +34,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const stored = JSON.parse(raw);
-        setUser(stored.user);
-        setAccessToken(stored.token);
-      }
-    } catch { /* ignore */ }
-    setLoading(false);
+    // Mevcut oturumu kontrol et
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(toAuthUser(session?.user ?? null, session));
+      setAccessToken(session?.access_token ?? null);
+      setLoading(false);
+    });
+
+    // Oturum değişikliklerini dinle
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(toAuthUser(session?.user ?? null, session));
+      setAccessToken(session?.access_token ?? null);
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const signUp = async (
@@ -72,56 +56,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     password: string,
     name: string
   ): Promise<{ error?: string; token?: string }> => {
-    const users = getUsersDB();
-    const exists = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-
-    if (exists) {
-      return { error: "Bu e-posta adresi zaten kayıtlı" };
-    }
-
-    const newUser: UserRecord = {
-      id: crypto.randomUUID(),
+    const { data, error } = await supabase.auth.signUp({
       email,
-      password, // In production this should be hashed
-      name
-    };
-
-    users.push(newUser);
-    saveUsersDB(users);
-
-    const mockUser: AuthUser = { id: newUser.id, email: newUser.email, name: newUser.name };
-    const mockToken = "mock-token-" + Date.now();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ user: mockUser, token: mockToken }));
-    setUser(mockUser);
-    setAccessToken(mockToken);
-    return { token: mockToken };
+      password,
+      options: { data: { full_name: name } },
+    });
+    if (error) return { error: error.message };
+    return { token: data.session?.access_token };
   };
 
   const signIn = async (
     email: string,
     password: string
   ): Promise<{ error?: string; token?: string }> => {
-    const users = getUsersDB();
-    const userRecord = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-
-    if (!userRecord) {
-      return { error: "E-posta veya şifre hatalı" };
-    }
-
-    if (userRecord.password !== password) {
-      return { error: "E-posta veya şifre hatalı" };
-    }
-
-    const mockUser: AuthUser = { id: userRecord.id, email: userRecord.email, name: userRecord.name };
-    const mockToken = "mock-token-" + Date.now();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ user: mockUser, token: mockToken }));
-    setUser(mockUser);
-    setAccessToken(mockToken);
-    return { token: mockToken };
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return { error: error.message };
+    return { token: data.session?.access_token };
   };
 
   const signOut = async () => {
-    localStorage.removeItem(STORAGE_KEY);
+    await supabase.auth.signOut();
     setUser(null);
     setAccessToken(null);
   };
@@ -135,6 +89,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  // No longer need null check since we have default value
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }
