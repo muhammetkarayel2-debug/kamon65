@@ -14,17 +14,18 @@ interface AuthContextType {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error?: string; token?: string }>;
   signUp: (email: string, password: string, name: string) => Promise<{ error?: string; token?: string }>;
+  signInWithGoogle: () => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-function toAuthUser(user: User | null, session: Session | null): AuthUser | null {
+function toAuthUser(user: User | null): AuthUser | null {
   if (!user) return null;
   return {
     id: user.id,
     email: user.email || "",
-    name: user.user_metadata?.full_name || user.email?.split("@")[0] || "",
+    name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "",
   };
 }
 
@@ -34,16 +35,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Mevcut oturumu kontrol et
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(toAuthUser(session?.user ?? null, session));
+      setUser(toAuthUser(session?.user ?? null));
       setAccessToken(session?.access_token ?? null);
       setLoading(false);
     });
 
-    // Oturum değişikliklerini dinle
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(toAuthUser(session?.user ?? null, session));
+      setUser(toAuthUser(session?.user ?? null));
       setAccessToken(session?.access_token ?? null);
       setLoading(false);
     });
@@ -51,27 +50,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (
-    email: string,
-    password: string,
-    name: string
-  ): Promise<{ error?: string; token?: string }> => {
+  const signUp = async (email: string, password: string, name: string) => {
     const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
+      email, password,
       options: { data: { full_name: name } },
     });
     if (error) return { error: error.message };
     return { token: data.session?.access_token };
   };
 
-  const signIn = async (
-    email: string,
-    password: string
-  ): Promise<{ error?: string; token?: string }> => {
+  const signIn = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
     return { token: data.session?.access_token };
+  };
+
+  const signInWithGoogle = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/dashboard`,
+      },
+    });
+    if (error) return { error: error.message };
+    return {};
   };
 
   const signOut = async () => {
@@ -81,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, accessToken, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, accessToken, loading, signIn, signUp, signInWithGoogle, signOut }}>
       {children}
     </AuthContext.Provider>
   );
