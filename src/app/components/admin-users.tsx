@@ -1,94 +1,137 @@
-import { useState, useMemo } from "react";
-import { Users, Building2, Mail, Search, Eye, MessageSquare, FileText, X, Send, CheckCircle } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
 import {
-  Company, Invoice, AdminMessage,
-  loadFromStorage, saveToStorage,
-  MOCK_COMPANIES_KEY, MOCK_BILLING_KEY,
-  ADMIN_MESSAGES_KEY, COMPANY_TYPE_LABELS, formatDate, formatDateTime
-} from "./admin-data";
-
-interface UserRecord {
-  email: string;
-  companies: Company[];
-  totalInvoiced: number;
-  totalPaid: number;
-  lastActivity: string;
-}
+  Users, Building2, Mail, Search, Eye, MessageSquare,
+  X, Send, CheckCircle, AlertTriangle
+} from "lucide-react";
+import { COMPANY_TYPE_LABELS, STATUS_CONFIG, formatDate } from "./admin-data";
 
 interface Props { refreshKey: number; onRefresh: () => void; }
 
+interface UserRecord {
+  email: string;
+  companies: any[];
+  totalPaid: number;
+  totalUnpaid: number;
+  lastActivity: string;
+}
+
 export function AdminUsers({ refreshKey, onRefresh }: Props) {
-  const [search, setSearch] = useState("");
-  const [viewUser, setViewUser] = useState<UserRecord | null>(null);
-  const [msgModal, setMsgModal] = useState<string | null>(null); // email
+  const [users, setUsers]     = useState<UserRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch]   = useState("");
+  const [viewUser, setViewUser]   = useState<UserRecord | null>(null);
+  const [msgModal, setMsgModal]   = useState<string | null>(null);
   const [msgSubject, setMsgSubject] = useState("");
-  const [msgBody, setMsgBody] = useState("");
-  const [msgSent, setMsgSent] = useState(false);
+  const [msgBody, setMsgBody]       = useState("");
+  const [msgSent, setMsgSent]       = useState(false);
+  const [msgSaving, setMsgSaving]   = useState(false);
+  const [msgErr, setMsgErr]         = useState("");
 
-  const users = useMemo(() => {
-    const companies = loadFromStorage<Company[]>(MOCK_COMPANIES_KEY, []);
-    const allBilling = loadFromStorage<Record<string, Invoice[]>>(MOCK_BILLING_KEY, {});
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { adminGetAllCompanies, adminGetAllBilling } = await import("./supabase-client");
+      const [companies, billing] = await Promise.all([
+        adminGetAllCompanies(),
+        adminGetAllBilling(),
+      ]);
 
-    const userMap: Record<string, UserRecord> = {};
-    companies.forEach(c => {
-      const email = c.userEmail || c.email || "bilinmiyor";
-      if (!userMap[email]) {
-        userMap[email] = { email, companies: [], totalInvoiced: 0, totalPaid: 0, lastActivity: c.createdAt };
-      }
-      userMap[email].companies.push(c);
-      if (new Date(c.updatedAt) > new Date(userMap[email].lastActivity)) {
-        userMap[email].lastActivity = c.updatedAt;
-      }
-      const invs = allBilling[c.id] || [];
-      invs.forEach(inv => {
-        const amt = parseFloat(inv.amount.replace(/[^\d,]/g, "").replace(",", ".")) || 0;
-        userMap[email].totalInvoiced += amt;
-        if (inv.status === "paid") userMap[email].totalPaid += amt;
+      /* Kullanıcıları e-posta bazında grupla */
+      const userMap: Record<string, UserRecord> = {};
+      companies.forEach((c: any) => {
+        const email = c.user_email || "bilinmiyor";
+        if (!userMap[email]) {
+          userMap[email] = {
+            email, companies: [],
+            totalPaid: 0, totalUnpaid: 0,
+            lastActivity: c.guncelleme || c.olusturulma,
+          };
+        }
+        userMap[email].companies.push(c);
+        if (new Date(c.guncelleme) > new Date(userMap[email].lastActivity)) {
+          userMap[email].lastActivity = c.guncelleme;
+        }
       });
-    });
 
-    return Object.values(userMap).sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+      /* Fatura toplamlarını kullanıcıya bağla */
+      billing.forEach((b: any) => {
+        const c = companies.find((x: any) => x.id === b.company_id);
+        if (!c) return;
+        const email = c.user_email || "bilinmiyor";
+        if (!userMap[email]) return;
+        if (b.status === "paid") {
+          userMap[email].totalPaid += b.amount_num || 0;
+        } else {
+          userMap[email].totalUnpaid += b.amount_num || 0;
+        }
+      });
 
-  const messages = useMemo(() => loadFromStorage<AdminMessage[]>(ADMIN_MESSAGES_KEY, []), [refreshKey]);
+      setUsers(
+        Object.values(userMap).sort(
+          (a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+        )
+      );
+    } catch (e) {
+      console.error("Kullanıcı yükleme hatası:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const filtered = useMemo(() => {
-    if (!search) return users;
+  useEffect(() => { load(); }, [refreshKey, load]);
+
+  const filtered = users.filter(u => {
+    if (!search) return true;
     const q = search.toLowerCase();
-    return users.filter(u => u.email.toLowerCase().includes(q) || u.companies.some(c => c.companyName?.toLowerCase().includes(q)));
-  }, [users, search]);
+    return u.email.toLowerCase().includes(q)
+      || u.companies.some((c: any) => (c.company_name || "").toLowerCase().includes(q));
+  });
 
-  const sendMessage = () => {
+  /* E-posta gönder — şimdilik documents tablosuna "admin mesajı" kaydeder */
+  const sendMessage = async () => {
     if (!msgModal || !msgSubject.trim() || !msgBody.trim()) return;
-    const msg: AdminMessage = {
-      id: crypto.randomUUID(),
-      userEmail: msgModal,
-      subject: msgSubject.trim(),
-      body: msgBody.trim(),
-      sentAt: new Date().toISOString(),
-      isRead: false,
-    };
-    const existing = loadFromStorage<AdminMessage[]>(ADMIN_MESSAGES_KEY, []);
-    saveToStorage(ADMIN_MESSAGES_KEY, [msg, ...existing]);
-    setMsgSent(true);
-    setTimeout(() => { setMsgModal(null); setMsgSubject(""); setMsgBody(""); setMsgSent(false); onRefresh(); }, 1000);
+    setMsgSaving(true);
+    setMsgErr("");
+    try {
+      /* Kullanıcının şirketini bul */
+      const { supabase } = await import("./supabase-client");
+      const userCompany = users.find(u => u.email === msgModal)?.companies?.[0];
+      if (userCompany) {
+        await supabase.from("documents").insert({
+          company_id: userCompany.id,
+          evrak_id:   `msg_${Date.now()}`,
+          baslik:     msgSubject.trim(),
+          belge_not:  msgBody.trim(),
+          belge_turu: "mesaj",
+          yuklayan:   "admin",
+          durum:      "onaylandi",
+        });
+      }
+      setMsgSent(true);
+      setTimeout(() => {
+        setMsgModal(null); setMsgSubject(""); setMsgBody("");
+        setMsgSent(false); onRefresh();
+      }, 1000);
+    } catch (e: any) {
+      setMsgErr(e.message || "Hata oluştu");
+    } finally {
+      setMsgSaving(false);
+    }
   };
 
-  const userMessages = (email: string) => messages.filter(m => m.userEmail === email);
+  const tl = (n: number) => n.toLocaleString("tr-TR") + " ₺";
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-[#0B1D3A] text-lg font-bold">Kullanıcı Yönetimi</h2>
-          <p className="text-[#5A6478] text-xs mt-0.5">{users.length} aktif kullanıcı</p>
-        </div>
+      <div>
+        <h2 className="text-[#0B1D3A] text-lg font-bold">Kullanıcı Yönetimi</h2>
+        <p className="text-[#5A6478] text-xs mt-0.5">{users.length} aktif kullanıcı</p>
       </div>
 
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#5A6478]" />
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="E-posta veya şirket adı..."
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="E-posta veya şirket adı..."
           className="w-full pl-9 pr-4 py-2.5 bg-white border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]" />
       </div>
 
@@ -105,7 +148,9 @@ export function AdminUsers({ refreshKey, onRefresh }: Props) {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#F0EDE8]">
-              {filtered.length === 0 ? (
+              {loading ? (
+                <tr><td colSpan={5} className="text-center py-12 text-[#5A6478] text-sm">Yükleniyor...</td></tr>
+              ) : filtered.length === 0 ? (
                 <tr><td colSpan={5} className="text-center py-12 text-[#5A6478] text-sm">Kullanıcı bulunamadı.</td></tr>
               ) : filtered.map(u => (
                 <tr key={u.email} className="hover:bg-[#F8F7F4]">
@@ -123,19 +168,19 @@ export function AdminUsers({ refreshKey, onRefresh }: Props) {
                     </span>
                   </td>
                   <td className="px-4 py-3 hidden md:table-cell">
-                    <div>
-                      <p className="text-[#0B1D3A] text-xs font-semibold">{u.totalPaid.toLocaleString("tr-TR")} ₺</p>
-                      <p className="text-[#5A6478] text-xs">/ {u.totalInvoiced.toLocaleString("tr-TR")} ₺ toplam</p>
-                    </div>
+                    <p className="text-[#0B1D3A] text-xs font-semibold">{tl(u.totalPaid)}</p>
+                    <p className="text-[#5A6478] text-xs">/ {tl(u.totalPaid + u.totalUnpaid)} toplam</p>
                   </td>
-                  <td className="px-4 py-3 text-[#5A6478] text-xs hidden lg:table-cell">{formatDate(u.lastActivity)}</td>
+                  <td className="px-4 py-3 text-[#5A6478] text-xs hidden lg:table-cell">
+                    {formatDate(u.lastActivity)}
+                  </td>
                   <td className="px-5 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => setViewUser(u)}
                         className="p-1.5 text-[#5A6478] hover:text-[#0B1D3A] hover:bg-[#F0EDE8] rounded-lg transition-colors">
                         <Eye className="w-4 h-4" />
                       </button>
-                      <button onClick={() => setMsgModal(u.email)}
+                      <button onClick={() => { setMsgModal(u.email); setMsgSubject(""); setMsgBody(""); setMsgSent(false); setMsgErr(""); }}
                         className="p-1.5 text-[#5A6478] hover:text-[#C9952B] hover:bg-[#C9952B]/10 rounded-lg transition-colors">
                         <MessageSquare className="w-4 h-4" />
                       </button>
@@ -148,7 +193,7 @@ export function AdminUsers({ refreshKey, onRefresh }: Props) {
         </div>
       </div>
 
-      {/* View User Modal */}
+      {/* Kullanıcı Detay Modal */}
       {viewUser && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setViewUser(null)}>
           <div className="bg-white rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -165,47 +210,49 @@ export function AdminUsers({ refreshKey, onRefresh }: Props) {
               <button onClick={() => setViewUser(null)} className="text-white/60 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-5 space-y-4">
-              {/* Finance summary */}
+              {/* Ödeme özeti */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-green-50 border border-green-100 rounded-xl p-3">
                   <p className="text-green-600 text-xs mb-1">Ödenen</p>
-                  <p className="text-green-800 font-bold">{viewUser.totalPaid.toLocaleString("tr-TR")} ₺</p>
+                  <p className="text-green-800 font-bold">{tl(viewUser.totalPaid)}</p>
                 </div>
-                <div className="bg-red-50 border border-red-100 rounded-xl p-3">
-                  <p className="text-red-500 text-xs mb-1">Kalan Bakiye</p>
-                  <p className="text-red-700 font-bold">{(viewUser.totalInvoiced - viewUser.totalPaid).toLocaleString("tr-TR")} ₺</p>
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                  <p className="text-amber-600 text-xs mb-1">Bekleyen</p>
+                  <p className="text-amber-800 font-bold">{tl(viewUser.totalUnpaid)}</p>
                 </div>
               </div>
-              {/* Companies */}
+
+              {/* Şirketler */}
               <div>
-                <p className="text-xs text-[#5A6478] mb-2 flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5" /> Şirketler</p>
+                <p className="text-xs text-[#5A6478] mb-2 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5" /> Şirketler
+                </p>
                 <div className="space-y-2">
-                  {viewUser.companies.map(c => (
+                  {viewUser.companies.map((c: any) => (
                     <div key={c.id} className="flex items-center justify-between bg-[#F8F7F4] rounded-xl px-4 py-3">
                       <div>
-                        <p className="text-[#0B1D3A] text-sm font-medium">{c.companyName}</p>
-                        <p className="text-[#5A6478] text-xs">{COMPANY_TYPE_LABELS[c.companyType]}</p>
+                        <p className="text-[#0B1D3A] text-sm font-medium">{c.company_name}</p>
+                        <p className="text-[#5A6478] text-xs">
+                          {COMPANY_TYPE_LABELS[c.company_type] || c.company_type}
+                          {c.location === "istanbul" ? " · İstanbul" : c.city ? ` · ${c.city}` : ""}
+                        </p>
                       </div>
-                      <span className="inline-block px-2 py-0.5 rounded-full bg-[#C9952B]/10 text-[#C9952B] text-xs font-bold">{c.group}</span>
+                      <div className="text-right">
+                        <span className="inline-block px-2 py-0.5 rounded-full bg-[#C9952B]/10 text-[#C9952B] text-xs font-bold">
+                          {c.hesaplanan_grup || "—"}
+                        </span>
+                        {c.app_status && STATUS_CONFIG[c.app_status] && (
+                          <p className={`text-[10px] mt-0.5 ${STATUS_CONFIG[c.app_status].color}`}>
+                            {STATUS_CONFIG[c.app_status].label}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
-              {/* Messages */}
-              {userMessages(viewUser.email).length > 0 && (
-                <div>
-                  <p className="text-xs text-[#5A6478] mb-2 flex items-center gap-1.5"><Mail className="w-3.5 h-3.5" /> Gönderilen Mesajlar</p>
-                  <div className="space-y-2">
-                    {userMessages(viewUser.email).slice(0, 3).map(m => (
-                      <div key={m.id} className="bg-[#F8F7F4] rounded-xl px-4 py-3">
-                        <p className="text-[#0B1D3A] text-sm font-medium">{m.subject}</p>
-                        <p className="text-[#5A6478] text-xs mt-0.5">{formatDateTime(m.sentAt)}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <button onClick={() => { setViewUser(null); setMsgModal(viewUser.email); }}
+
+              <button onClick={() => { setViewUser(null); setMsgModal(viewUser.email); setMsgSubject(""); setMsgBody(""); setMsgSent(false); setMsgErr(""); }}
                 className="w-full bg-[#0B1D3A] hover:bg-[#122A54] text-white py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors">
                 <MessageSquare className="w-4 h-4" /> Mesaj Gönder
               </button>
@@ -214,7 +261,7 @@ export function AdminUsers({ refreshKey, onRefresh }: Props) {
         </div>
       )}
 
-      {/* Message Modal */}
+      {/* Mesaj Modal */}
       {msgModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setMsgModal(null)}>
           <div className="bg-white rounded-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
@@ -225,26 +272,44 @@ export function AdminUsers({ refreshKey, onRefresh }: Props) {
             <div className="p-5 space-y-4">
               <div>
                 <label className="block text-xs text-[#5A6478] mb-1">Alıcı</label>
-                <input value={msgModal} readOnly className="w-full px-3 py-2.5 bg-[#F8F7F4] border border-[#E8E4DC] rounded-lg text-sm text-[#5A6478]" />
+                <input value={msgModal} readOnly
+                  className="w-full px-3 py-2.5 bg-[#F8F7F4] border border-[#E8E4DC] rounded-lg text-sm text-[#5A6478]" />
               </div>
               <div>
                 <label className="block text-xs text-[#5A6478] mb-1">Konu <span className="text-red-400">*</span></label>
-                <input value={msgSubject} onChange={e => setMsgSubject(e.target.value)} placeholder="Konu girin..."
+                <input value={msgSubject} onChange={e => setMsgSubject(e.target.value)}
+                  placeholder="Konu girin..."
                   className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]" />
               </div>
               <div>
                 <label className="block text-xs text-[#5A6478] mb-1">Mesaj <span className="text-red-400">*</span></label>
-                <textarea value={msgBody} onChange={e => setMsgBody(e.target.value)} rows={5} placeholder="Mesajınızı yazın..."
+                <textarea value={msgBody} onChange={e => setMsgBody(e.target.value)} rows={5}
+                  placeholder="Mesajınızı yazın..."
                   className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B] resize-none" />
               </div>
             </div>
             <div className="p-5 border-t border-[#E8E4DC] flex items-center justify-between">
-              {msgSent && <span className="text-green-600 text-sm flex items-center gap-1"><CheckCircle className="w-4 h-4" /> Gönderildi</span>}
-              <div className="flex gap-3 ml-auto">
-                <button onClick={() => setMsgModal(null)} className="px-4 py-2 text-sm text-[#5A6478] border border-[#E8E4DC] rounded-lg hover:bg-[#F8F7F4]">İptal</button>
-                <button onClick={sendMessage} disabled={!msgSubject.trim() || !msgBody.trim()}
+              <div>
+                {msgSent && (
+                  <span className="text-green-600 text-sm flex items-center gap-1">
+                    <CheckCircle className="w-4 h-4" /> Gönderildi
+                  </span>
+                )}
+                {msgErr && (
+                  <span className="text-red-500 text-sm flex items-center gap-1">
+                    <AlertTriangle className="w-4 h-4" /> {msgErr}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setMsgModal(null)}
+                  className="px-4 py-2 text-sm text-[#5A6478] border border-[#E8E4DC] rounded-lg hover:bg-[#F8F7F4]">
+                  İptal
+                </button>
+                <button onClick={sendMessage}
+                  disabled={msgSaving || !msgSubject.trim() || !msgBody.trim()}
                   className="px-4 py-2 text-sm bg-[#0B1D3A] hover:bg-[#122A54] disabled:bg-gray-300 text-white rounded-lg flex items-center gap-1.5">
-                  <Send className="w-4 h-4" /> Gönder
+                  <Send className="w-4 h-4" /> {msgSaving ? "Gönderiliyor..." : "Gönder"}
                 </button>
               </div>
             </div>
