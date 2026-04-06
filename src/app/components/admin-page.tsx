@@ -5,7 +5,7 @@ import {
   CreditCard, Tag, Menu, X, LogOut, ChevronRight, Award,
   Eye, EyeOff, Shield, AlertCircle
 } from "lucide-react";
-import { loadFromStorage, saveToStorage, ADMIN_SESSION_KEY, MOCK_BILLING_KEY, MOCK_PROCESS_KEY } from "./admin-data";
+import { loadFromStorage, saveToStorage, ADMIN_SESSION_KEY } from "./admin-data";
 import { AdminDashboard } from "./admin-dashboard";
 import { AdminCompanies } from "./admin-companies";
 import { AdminUsers } from "./admin-users";
@@ -14,39 +14,28 @@ import { AdminDocuments } from "./admin-documents";
 import { AdminBilling } from "./admin-billing";
 import { AdminBlog } from "./admin-blog";
 import { AdminVeritabani } from "./admin-veritabani";
-import { AdminBagimsizHesaplama, AdminBagimsizMali } from "./admin-bagimsiz";
 import { AdminHesaplama } from "./admin-hesaplama";
 
 const ADMIN_EMAIL    = "admin@muteahhitlikbelgesi.com";
 const ADMIN_PASSWORD = "Admin123!";
 
-type AdminTab = "dashboard" | "sirketler" | "kullanicilar" | "basvurular" | "hesaplama" | "evraklar" | "faturalar" | "blog" | "bag_hesaplama" | "bag_mali" | "veritabani";
+type AdminTab = "dashboard" | "sirketler" | "kullanicilar" | "basvurular" | "hesaplama" | "evraklar" | "faturalar" | "blog" | "veritabani";
 
 const NAV_ITEMS: { key: AdminTab; label: string; icon: React.ElementType }[] = [
-  { key: "dashboard",    label: "Dashboard",      icon: LayoutDashboard },
-  { key: "sirketler",    label: "Şirketler",      icon: Building2       },
-  { key: "kullanicilar", label: "Kullanıcılar",   icon: Users           },
-  { key: "basvurular",  label: "Başvurular",      icon: Activity        },
-  { key: "hesaplama",  label: "Hesaplama",       icon: Calculator      },
-  { key: "evraklar",    label: "Evraklar",        icon: FolderOpen      },
-  { key: "faturalar",   label: "Faturalar",       icon: CreditCard      },
-  { key: "blog",          label: "Blog",              icon: FileText    },
-  { key: "bag_hesaplama",label: "Bağ. Hesaplama",    icon: Calculator  },
-  { key: "bag_mali",     label: "Bağ. Mali Yet.",    icon: TrendingUp  },
-  { key: "veritabani",   label: "Veri Tabanı",       icon: Database    },
+  { key: "dashboard",    label: "Dashboard",    icon: LayoutDashboard },
+  { key: "sirketler",    label: "Şirketler",    icon: Building2       },
+  { key: "kullanicilar", label: "Kullanıcılar", icon: Users           },
+  { key: "basvurular",   label: "Başvurular",   icon: Activity        },
+  { key: "hesaplama",    label: "Hesaplama",    icon: Calculator      },
+  { key: "evraklar",     label: "Evraklar",     icon: FolderOpen      },
+  { key: "faturalar",    label: "Faturalar",    icon: CreditCard      },
+  { key: "blog",         label: "Blog",         icon: FileText        },
+  // veritabani gizli — URL ile erişilebilir: ?tab=veritabani
 ];
 
-function getBadge(tab: AdminTab): number {
-  try {
-    if (tab === "faturalar") {
-      const b = loadFromStorage<Record<string, { status: string }[]>>(MOCK_BILLING_KEY, {});
-      return Object.values(b).flat().filter(i => i.status === "unpaid").length;
-    }
-    if (tab === "basvurular") {
-      const p = loadFromStorage<Record<string, { appStatus?: string }[]>>(MOCK_PROCESS_KEY, {});
-      return Object.values(p).filter((v: any) => v?.appStatus === "payment_received" || v?.appStatus === "report_locked").length;
-    }
-  } catch {}
+function getBadge(_tab: AdminTab): number {
+  // Supabase gerçek zamanlı badge sayıları — şimdilik 0 döndür
+  // İleri aşamada: adminGetAllBilling() veya adminGetAllCompanies() ile hesaplanır
   return 0;
 }
 
@@ -120,23 +109,16 @@ function AdminLogin({ onLogin }: { onLogin: () => void }) {
 
 /* ── Ayarlar ── */
 function AdminSettings({ onLogout }: { onLogout: () => void }) {
-  const [cleared, setCleared] = useState(false);
-  const clear = () => {
-    ["mock_panel_companies","mock_panel_docs","mock_panel_process","mock_panel_billing","admin_discounts"].forEach(k => localStorage.removeItem(k));
-    setCleared(true); setTimeout(() => setCleared(false), 2000);
-  };
   return (
     <div className="space-y-5 max-w-xl">
       <div><h2 className="text-[#0B1D3A] text-lg font-bold">Ayarlar</h2></div>
       <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-        <h3 className="text-sm font-semibold text-[#0B1D3A] mb-3">Demo Veri Temizle</h3>
-        <button onClick={clear} className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 px-4 py-2 rounded-lg text-sm transition-colors">
-          {cleared ? "Temizlendi ✓" : "Tüm Verileri Temizle"}
-        </button>
-      </div>
-      <div className="bg-[#0B1D3A]/5 rounded-2xl border border-[#0B1D3A]/10 p-5 text-xs text-[#5A6478] space-y-1">
-        <p>Platform: muteahhitlikbelgesi.com</p>
-        <p>Veri: localStorage (Supabase entegrasyonu beklemede)</p>
+        <h3 className="text-sm font-semibold text-[#0B1D3A] mb-1">Platform Bilgisi</h3>
+        <div className="text-xs text-[#5A6478] space-y-1 mt-3">
+          <p>Platform: muteahhitlikbelgesi.com</p>
+          <p>Veritabanı: Supabase (lngsxebduxphfsyeewep)</p>
+          <p>Storage: iskan-belgeleri · evraklar · admin-evraklar</p>
+        </div>
       </div>
       <div className="bg-white rounded-2xl border border-[#E8E4DC] p-5">
         <button onClick={onLogout} className="flex items-center gap-2 border border-[#E8E4DC] text-[#5A6478] hover:text-red-500 hover:border-red-200 px-4 py-2 rounded-lg text-sm transition-colors">
@@ -160,11 +142,7 @@ export function AdminPage() {
     if (s?.email === ADMIN_EMAIL) setIsLoggedIn(true);
   }, []);
 
-  const handleLogout = () => {
-    localStorage.removeItem(ADMIN_SESSION_KEY);
-    setIsLoggedIn(false);
-    window.location.href = "/";
-  };
+  const handleLogout = () => { localStorage.removeItem(ADMIN_SESSION_KEY); setIsLoggedIn(false); };
   const handleNavigate = useCallback((tab: string) => { setActiveTab(tab as AdminTab); setSidebarOpen(false); }, []);
   const refresh = useCallback(() => setRefreshKey(k => k + 1), []);
 
@@ -178,14 +156,12 @@ export function AdminPage() {
       case "sirketler":   return <AdminCompanies {...props} />;
       case "kullanicilar":return <AdminUsers {...props} />;
       case "basvurular":  return <AdminProcesses {...props} />;      
-      case "hesaplama":   return <AdminHesaplama {...props} />;
-      case "evraklar":    return <AdminDocuments {...props} />;
-      case "faturalar":   return <AdminBilling {...props} />;
-      case "blog":           return <AdminBlog {...props} />;
-      case "bag_hesaplama":return <AdminBagimsizHesaplama {...props} />;
-      case "bag_mali":    return <AdminBagimsizMali {...props} />;
-      case "veritabani":  return <AdminVeritabani {...props} />;
-      default:            return null;
+      case "hesaplama":    return <AdminHesaplama {...props} />;
+      case "evraklar":     return <AdminDocuments {...props} />;
+      case "faturalar":    return <AdminBilling {...props} />;
+      case "blog":         return <AdminBlog {...props} />;
+      case "veritabani":   return <AdminVeritabani {...props} />;
+      default:             return null;
     }
   };
 
