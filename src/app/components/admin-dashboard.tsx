@@ -7,7 +7,7 @@ import {
   Company, Invoice, ProcessData, AdminReport, AdminMessage,
   loadFromStorage, MOCK_COMPANIES_KEY, MOCK_BILLING_KEY,
   MOCK_PROCESS_KEY, ADMIN_REPORTS_KEY, ADMIN_MESSAGES_KEY,
-  formatDateTime, getStatusInfo, seedDemoData
+  formatDateTime, getStatusInfo
 } from "./admin-data";
 
 interface StatCardProps {
@@ -107,7 +107,7 @@ export function AdminDashboard({ onNavigate, refreshKey }: Props) {
   }, [refreshKey]);
 
   const handleSeed = () => {
-    seedDemoData();
+    
     window.location.reload();
   };
 
