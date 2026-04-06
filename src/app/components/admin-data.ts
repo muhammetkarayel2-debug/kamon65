@@ -6,6 +6,27 @@
 
 export const ADMIN_SESSION_KEY = "admin_auth_session"; // sadece login session için
 
+// ── AppStatus tipi ──
+export type AppStatus =
+  | "wizard_incomplete" | "pending_financial" | "pending_payment"
+  | "payment_received"  | "report_locked"     | "report_published"
+  | "docs_in_progress"  | "docs_complete"
+  | "application_submitted" | "certificate_received";
+
+// ── Status görsel config ──
+export const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  wizard_incomplete:     { label: "Başvuru eksik",         color: "text-gray-600",  bg: "bg-gray-100",  border: "border-gray-200"  },
+  pending_financial:     { label: "Mali bilgi bekleniyor", color: "text-blue-600",  bg: "bg-blue-50",   border: "border-blue-200"  },
+  pending_payment:       { label: "Ödeme bekleniyor",      color: "text-amber-700", bg: "bg-amber-50",  border: "border-amber-200" },
+  payment_received:      { label: "Ödeme alındı",          color: "text-blue-600",  bg: "bg-blue-50",   border: "border-blue-200"  },
+  report_locked:         { label: "Rapor hazırlanıyor",    color: "text-blue-600",  bg: "bg-blue-50",   border: "border-blue-200"  },
+  report_published:      { label: "Rapor yayınlandı",      color: "text-green-700", bg: "bg-green-50",  border: "border-green-200" },
+  docs_in_progress:      { label: "Evrak toplanıyor",      color: "text-amber-700", bg: "bg-amber-50",  border: "border-amber-200" },
+  docs_complete:         { label: "Evraklar tamam",        color: "text-green-700", bg: "bg-green-50",  border: "border-green-200" },
+  application_submitted: { label: "Başvuru yapıldı",       color: "text-blue-600",  bg: "bg-blue-50",   border: "border-blue-200"  },
+  certificate_received:  { label: "Belge alındı",          color: "text-green-700", bg: "bg-green-50",  border: "border-green-200" },
+};
+
 // ── Supabase'den gelen Company tipi (UI için normalize edilmiş) ──
 export interface Company {
   id: string;
