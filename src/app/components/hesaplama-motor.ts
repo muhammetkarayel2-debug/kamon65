@@ -24,8 +24,7 @@ export const UFE: Record<string, number[]> = {
   "2010":[164.94,167.68,170.94,174.96,172.95,172.08,171.81,173.79,174.67,176.78,176.23,178.54],
 };
 
-// ─── 2026 Tebliği Birim Maliyetleri ──────────────────────────────
-// Kaynak: 3 Şubat 2026 tarihli Resmi Gazete
+// ─── 2026 Tebliği Birim Maliyetleri (TL/m²) ──────────────────────
 export const BM_2026: Record<string, number> = {
   "I.A":    2_600,
   "I.B":    3_900,
@@ -48,9 +47,6 @@ export const BM_2026: Record<string, number> = {
 };
 
 // ─── Geçmiş yıl birim maliyetleri ────────────────────────────────
-// Not: Eski tebliğlerde III.A, III.B, III.C gibi detaylı ayrım yoktu,
-// genellikle III.B ve IV.A gibi ana sınıflar kullanılıyordu.
-// Müşterinin ruhsatta gördüğü sınıf için geçmiş yıl tutarları:
 export const BM_GECMIS: Record<string, Record<string, number>> = {
   "2025":{"III.B":18200,"III.C":19150,"IV.A":21500,"IV.B":27500,"IV.C":32600,"V.A":34500,"V.B":35600,"V.C":39500,"V.D":43400},
   "2024":{"III.B":14400,"III.C":15100,"IV.A":15600,"IV.B":18200,"IV.C":21500,"V.A":22750},
@@ -73,59 +69,91 @@ export const BM_GECMIS: Record<string, Record<string, number>> = {
   "2010":{"III.B":360,"IV.A":400,"IV.B":450,"V.A":600},
 };
 
-// ─── 2026 Tebliğine göre yapı sınıfı → 2026 güncel sınıfı ────────
-// Kullanım tipi + yükseklik birlikte değerlendirilir
-// yapiTipi: "konut" | "konut_ticari" | "ticari" | "diger"
-export function guncelSinif2026(
-  yukseklikM: number,
-  yapiTipi: string
-): string {
-  const h = yukseklikM;
+// ─── 2026 Tebliğine göre yapı sınıfı ─────────────────────────────
+// Kullanım tipi + yükseklik + detay bilgi (otel yıldızı, hastane yatak vb.)
+// yapiTipi: "konut" | "konut_ticari" | "ticari" | "sanayi" | "otel" | "hastane" | "avm" | "diger"
 
-  if (yapiTipi === "konut") {
-    // Tebliğ III.B madde 12: Konut (yapı yüksekliği 21.50m altı, üç kat üzeri, 21.50m dahil)
-    // Tebliğ III.C madde 8: Konut (21.50m'den fazla ve 30.50m'den az, 30.50m dahil)
-    // Tebliğ IV.A madde 12: Konut (30.50m'den fazla ve 51.50m'den az, 51.50m dahil)
-    // Tebliğ IV.B madde 9: Konut (51.50m üzeri)
-    if (h <= 21.50) return "III.B";
-    if (h <= 30.50) return "III.C";
-    if (h <= 51.50) return "IV.A";
-    return "IV.B";
+export interface SinifGirdisi {
+  yukseklikM: number;
+  yapiTipi: string;
+  // Özel yapı detayları
+  otelYildiz?: 1|2|3|4|5;           // otel için
+  hastaneYatak?: number;             // hastane için
+  sanayiDosemeYuku?: number;         // sanayi için (kg/m²)
+  avmAlanM2?: number;                // AVM için
+}
+
+export interface SinifOneri {
+  sinif: string;
+  sebep: string;
+}
+
+export function guncelSinif2026(girdi: SinifGirdisi): SinifOneri {
+  const { yukseklikM: h, yapiTipi } = girdi;
+
+  // ── Konut ──────────────────────────────────────────────────────
+  // Tebliğ III.B-12, III.C-8, IV.A-12, IV.B-9
+  if (yapiTipi === "konut" || yapiTipi === "konut_ticari") {
+    // Konut+Ticari: nota göre her zaman konut eşiği kullanılır
+    if (h <= 21.50) return { sinif: "III.B", sebep: `Konut, ${h}m ≤ 21.50m → III.B` };
+    if (h <= 30.50) return { sinif: "III.C", sebep: `Konut, ${h}m → 21.50–30.50m arası → III.C` };
+    if (h <= 51.50) return { sinif: "IV.A",  sebep: `Konut, ${h}m → 30.50–51.50m arası → IV.A` };
+    return { sinif: "IV.B", sebep: `Konut, ${h}m > 51.50m → IV.B` };
   }
 
-  if (yapiTipi === "konut_ticari") {
-    // Karma yapı: konut + ticari birlikte
-    // Tebliğ V.A madde 4: Karma kullanımlı yapılar (AVM ile birlikte ofis ve/veya konutların yer aldığı kompleks yapılar)
-    // Ancak küçük ölçekli konut+ticari için ticari sınıfı uygulanır
-    // Zemin kat dükkan, üst kat konut → ticari sınıf esasına göre
-    // III.C madde 6: İş merkezleri/ticari (21.50m altı, üç kat üzeri, 21.50m dahil)
-    // IV.A madde 9: İş merkezleri/ticari (21.50m-30.50m dahil)
-    // IV.B madde 7: İş merkezleri/ticari (30.50m-51.50m dahil)
-    // V.A madde 3: İş merkezleri/ticari (51.50m üzeri)
-    if (h <= 21.50) return "III.C";
-    if (h <= 30.50) return "IV.A";
-    if (h <= 51.50) return "IV.B";
-    return "V.A";
-  }
-
+  // ── Ticari / İş merkezi ────────────────────────────────────────
+  // Tebliğ III.B-9, III.C-6, IV.A-9, IV.B-7, V.A-3
   if (yapiTipi === "ticari") {
-    // III.B madde 9: İş merkezleri/ticari (üç kata kadar, üç kat dahil) → yükseklik ~9.50m altı
-    // III.C madde 6: İş merkezleri/ticari (21.50m altı üç kat üzeri, 21.50m dahil)
-    // IV.A madde 9: İş merkezleri/ticari (21.50m-30.50m dahil)
-    // IV.B madde 7: İş merkezleri/ticari (30.50m-51.50m dahil)
-    // V.A madde 3: İş merkezleri/ticari (51.50m üzeri)
-    if (h <= 9.50)  return "III.B"; // 3 kata kadar
-    if (h <= 21.50) return "III.C";
-    if (h <= 30.50) return "IV.A";
-    if (h <= 51.50) return "IV.B";
-    return "V.A";
+    if (h <= 9.50)  return { sinif: "III.B", sebep: `Ticari, ${h}m ≤ 9.50m (3 kat) → III.B` };
+    if (h <= 21.50) return { sinif: "III.C", sebep: `Ticari, ${h}m → 9.50–21.50m arası → III.C` };
+    if (h <= 30.50) return { sinif: "IV.A",  sebep: `Ticari, ${h}m → 21.50–30.50m arası → IV.A` };
+    if (h <= 51.50) return { sinif: "IV.B",  sebep: `Ticari, ${h}m → 30.50–51.50m arası → IV.B` };
+    return { sinif: "V.A", sebep: `Ticari, ${h}m > 51.50m → V.A` };
   }
 
-  // "diger" veya tanımsız: sadece yüksekliğe göre konut eşiği kullan (güvenli taraf)
-  if (h <= 21.50) return "III.B";
-  if (h <= 30.50) return "III.C";
-  if (h <= 51.50) return "IV.A";
-  return "IV.B";
+  // ── Sanayi ─────────────────────────────────────────────────────
+  // Tebliğ II.C-5 (0-500), III.B-16 (501-3000), IV.A-17 (3001+)
+  if (yapiTipi === "sanayi") {
+    const yuk = girdi.sanayiDosemeYuku || 0;
+    if (yuk <= 500)  return { sinif: "II.C",  sebep: `Sanayi, döşeme yükü ${yuk} kg/m² ≤ 500 → II.C` };
+    if (yuk <= 3000) return { sinif: "III.B", sebep: `Sanayi, döşeme yükü ${yuk} kg/m² → 501–3000 → III.B` };
+    return { sinif: "IV.A", sebep: `Sanayi, döşeme yükü ${yuk} kg/m² > 3000 → IV.A` };
+  }
+
+  // ── Otel ───────────────────────────────────────────────────────
+  // Tebliğ IV.A-14 (1-2*), IV.C-12 (3*), V.B-5 (4*), V.D-3 (5*)
+  if (yapiTipi === "otel") {
+    const yildiz = girdi.otelYildiz || 1;
+    if (yildiz <= 2) return { sinif: "IV.A", sebep: `Otel, ${yildiz} yıldız → IV.A` };
+    if (yildiz === 3) return { sinif: "IV.C", sebep: `Otel, 3 yıldız → IV.C` };
+    if (yildiz === 4) return { sinif: "V.B",  sebep: `Otel, 4 yıldız → V.B` };
+    return { sinif: "V.D", sebep: `Otel, 5 yıldız → V.D` };
+  }
+
+  // ── Hastane ────────────────────────────────────────────────────
+  // Tebliğ IV.C-6 (<200), V.B-2 (200-400), V.C-2 (400+)
+  if (yapiTipi === "hastane") {
+    const yatak = girdi.hastaneYatak || 0;
+    if (yatak < 200)  return { sinif: "IV.C", sebep: `Hastane, ${yatak} yatak < 200 → IV.C` };
+    if (yatak <= 400) return { sinif: "V.B",  sebep: `Hastane, ${yatak} yatak → 200–400 arası → V.B` };
+    return { sinif: "V.C", sebep: `Hastane, ${yatak} yatak > 400 → V.C` };
+  }
+
+  // ── Alışveriş Merkezi ──────────────────────────────────────────
+  // Tebliğ IV.A-3 (<25000 m²), IV.C-2 (≥25000 m²)
+  if (yapiTipi === "avm") {
+    const alan = girdi.avmAlanM2 || 0;
+    if (alan < 25000) return { sinif: "IV.A", sebep: `AVM, ${alan.toLocaleString("tr-TR")} m² < 25.000 m² → IV.A` };
+    return { sinif: "IV.C", sebep: `AVM, ${alan.toLocaleString("tr-TR")} m² ≥ 25.000 m² → IV.C` };
+  }
+
+  // ── Diğer ──────────────────────────────────────────────────────
+  return { sinif: "diger", sebep: "Özel yapı — admin manuel sınıf belirlemeli" };
+}
+
+// Geriye dönük uyumluluk için basit string döndüren versiyon
+export function guncelSinifStr(yukseklikM: number, yapiTipi: string): string {
+  return guncelSinif2026({ yukseklikM, yapiTipi }).sinif;
 }
 
 // ─── Sınıf farkı tespiti (admin için) ────────────────────────────
@@ -134,39 +162,42 @@ export interface SinifUyari {
   guncel2026: string;
   farkVar: boolean;
   aciklama: string;
+  oneri: SinifOneri;
 }
 
 export function sinifUyariHesapla(
   ruhsatSinifi: string,
-  yukseklikM: number,
-  yapiTipi: string
+  girdi: SinifGirdisi
 ): SinifUyari {
-  const guncel = guncelSinif2026(yukseklikM, yapiTipi);
-  const farkVar = guncel !== ruhsatSinifi;
+  const oneri = guncelSinif2026(girdi);
+  const farkVar = oneri.sinif !== "diger" && oneri.sinif !== ruhsatSinifi;
   return {
     ruhsatSinifi,
-    guncel2026: guncel,
+    guncel2026: oneri.sinif,
     farkVar,
     aciklama: farkVar
-      ? `Ruhsatta ${ruhsatSinifi} görünüyor. ${yukseklikM}m yükseklik ve "${yapiTipi}" kullanım tipine göre 2026 tebliği: ${guncel}. Belge tutarı ${ruhsatSinifi} sınıfından, YMO hesabı ${guncel} sınıfından yapılacak.`
-      : `Ruhsat sınıfı (${ruhsatSinifi}) 2026 tebliğiyle örtüşüyor.`,
+      ? `Ruhsatta ${ruhsatSinifi} görünüyor. ${oneri.sebep}. Belge tutarı ${ruhsatSinifi} sınıfından, YMO hesabı ${oneri.sinif} sınıfından yapılacak.`
+      : oneri.sinif === "diger"
+        ? "Özel yapı tipi — admin sınıfı manuel belirlemeli."
+        : `Ruhsat sınıfı (${ruhsatSinifi}) 2026 tebliğiyle örtüşüyor. ${oneri.sebep}`,
+    oneri,
   };
 }
 
-// ─── Grup eşikleri (2026) ─────────────────────────────────────────
+// ─── Grup eşikleri (EK-4, 2026) ──────────────────────────────────
 export const GRUP_ESIKLER: Array<{ grup: string; min: number }> = [
   { grup: "A",  min: 2_476_500_000 },
   { grup: "B",  min: 1_733_550_000 },
   { grup: "B1", min: 1_485_900_000 },
   { grup: "C",  min: 1_238_250_000 },
-  { grup: "C1", min:   990_600_000 },
-  { grup: "D",  min:   743_325_000 },
-  { grup: "D1", min:   618_750_000 },
-  { grup: "E",  min:   495_000_000 },
-  { grup: "E1", min:   371_475_000 },
-  { grup: "F",  min:   247_650_000 },
-  { grup: "F1", min:   185_737_500 },
-  { grup: "G",  min:   123_825_000 },
+  { grup: "C1", min: 1_031_875_000 },
+  { grup: "D",  min:   825_500_000 },
+  { grup: "D1", min:   619_125_000 },
+  { grup: "E",  min:   412_750_000 },
+  { grup: "E1", min:   247_650_000 },
+  { grup: "F",  min:   123_825_000 },
+  { grup: "F1", min:   105_251_250 },
+  { grup: "G",  min:    86_677_500 },
   { grup: "G1", min:    61_912_500 },
   { grup: "H",  min:             0 },
 ];
@@ -184,21 +215,99 @@ export function birUstGrup(grup: string): { grup: string; min: number } | null {
   return GRUP_ESIKLER[idx - 1];
 }
 
-// ─── Diploma eşikleri ─────────────────────────────────────────────
-const DIPLOMA_ESIKLER = [
-  { maxYil: 4,   grup: "H"  },
-  { maxYil: 7,   grup: "G1" },
-  { maxYil: 10,  grup: "G"  },
-  { maxYil: 14,  grup: "F1" },
-  { maxYil: 999, grup: "F"  },
-];
+// ─── EK-3: Banka Referans Mektubu Asgari Tutarları (2026) ────────
+export const BANKA_REF_TUTARLARI: Record<string, number | null> = {
+  "A":  123_825_000,
+  "B":   86_677_500,
+  "B1":  74_295_000,
+  "C":   61_912_500,
+  "C1":  51_593_750,
+  "D":   41_275_000,
+  "D1":  30_956_250,
+  "E":   20_637_500,
+  "E1":  12_382_500,
+  "F":    6_191_250,
+  "F1":   5_262_563,
+  "G":    4_333_875,
+  "G1":   3_095_625,
+  "H":   null,        // Gerekmez
+};
 
-export function diplomaGrubu(mezuniyetTarihi: string): { grup: string; yil: number } {
-  const yil = Math.floor(
-    (Date.now() - new Date(mezuniyetTarihi).getTime()) / (365.25 * 24 * 3600 * 1000)
-  );
-  const e = DIPLOMA_ESIKLER.find(d => yil <= d.maxYil) || DIPLOMA_ESIKLER[DIPLOMA_ESIKLER.length - 1];
-  return { grup: e.grup, yil };
+export function grupIcinBankaRef(grup: string): number | null {
+  return BANKA_REF_TUTARLARI[grup] ?? null;
+}
+
+// ─── EK-2: İş Hacmi — Genel Ciro ve Yapım Cirosu (2026) ─────────
+export interface IsHacmi {
+  genelCiro: number | null;   // null = gerekmez
+  yapimCirosu: number | null;
+}
+
+export const IS_HACMI: Record<string, IsHacmi> = {
+  "A":  { genelCiro: 371_475_000, yapimCirosu: 297_180_000 },
+  "B":  { genelCiro: 260_032_500, yapimCirosu: 208_026_000 },
+  "B1": { genelCiro: 222_885_000, yapimCirosu: 178_308_000 },
+  "C":  { genelCiro: 185_737_500, yapimCirosu: 148_590_000 },
+  "C1": { genelCiro: 154_781_250, yapimCirosu: 123_825_000 },
+  "D":  { genelCiro: 123_825_000, yapimCirosu:  99_060_000 },
+  "D1": { genelCiro:  92_868_750, yapimCirosu:  74_295_000 },
+  "E":  { genelCiro:  41_275_000, yapimCirosu:  33_020_000 },
+  "E1": { genelCiro:  24_765_000, yapimCirosu:  19_812_000 },
+  "F":  { genelCiro: null,        yapimCirosu: null },
+  "F1": { genelCiro: null,        yapimCirosu: null },
+  "G":  { genelCiro: null,        yapimCirosu: null },
+  "G1": { genelCiro: null,        yapimCirosu: null },
+  "H":  { genelCiro: null,        yapimCirosu: null },
+};
+
+export function grupIcinIsHacmi(grup: string): IsHacmi {
+  return IS_HACMI[grup] || { genelCiro: null, yapimCirosu: null };
+}
+
+export function grupMaliYeterlilikGerektirir(grup: string): boolean {
+  // E ve üzeri gruplar için mali yeterlilik gerekiyor
+  const idx = GRUP_ESIKLER.findIndex(g => g.grup === grup);
+  const eIdx = GRUP_ESIKLER.findIndex(g => g.grup === "E");
+  return idx !== -1 && idx <= eIdx;
+}
+
+// ─── Diploma hesaplama — yıl+ay bazlı tutar ──────────────────────
+// İnşaat Mühendisliği / Mimarlık diploması için
+// Yıllık değer: 6.879.166,67 ₺ / Aylık: 573.263,89 ₺
+const DIPLOMA_YILLIK = 6_879_166.67;
+const DIPLOMA_AYLIK  =   573_263.89;
+
+export interface DiplomaHesap {
+  grup: string;
+  yil: number;
+  ay: number;
+  toplamAy: number;
+  tutar: number;
+  aciklama: string;
+}
+
+export function diplomaGrubu(mezuniyetTarihi: string): DiplomaHesap {
+  const mez = new Date(mezuniyetTarihi);
+  const bugun = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
+
+  let yil = bugun.getFullYear() - mez.getFullYear();
+  let ay  = bugun.getMonth()    - mez.getMonth();
+
+  if (bugun.getDate() < mez.getDate()) ay--;
+  if (ay < 0) { yil--; ay += 12; }
+
+  const toplamAy = yil * 12 + ay;
+  const tutar = Math.floor(yil * DIPLOMA_YILLIK + ay * DIPLOMA_AYLIK);
+  const grup = grupBul(tutar);
+
+  return {
+    grup,
+    yil,
+    ay,
+    toplamAy,
+    tutar,
+    aciklama: `${yil} yıl ${ay} ay diploması → ${tutar.toLocaleString("tr-TR")} ₺ → Grup ${grup}. İş deneyimiyle toplanamaz.`,
+  };
 }
 
 // ─── Yardımcı fonksiyonlar ────────────────────────────────────────
@@ -225,8 +334,6 @@ export function ufeEndeksi(tarih: string): number {
   return arr[m] ?? arr[arr.length - 1];
 }
 
-// ─── Birim fiyat çek ─────────────────────────────────────────────
-// Önce sözleşme döneminin tablosuna bak, yoksa 2026 tebliğine bak
 export function birimFiyat(sinif: string, donem: string): number {
   if (donem === "2026") return BM_2026[sinif] || 0;
   return BM_GECMIS[donem]?.[sinif] || BM_2026[sinif] || 0;
@@ -235,10 +342,10 @@ export function birimFiyat(sinif: string, donem: string): number {
 // ─── Tekil iş hesapla ─────────────────────────────────────────────
 export interface IsGirdisi {
   sozlesmeTarihi: string;
-  ruhsatSinifi: string;       // müşterinin seçtiği — belge tutarı için
-  ymoSinifi?: string;         // admin onaylıysa güncel sınıf — YMO için
-  alanM2: number;
-  tip: "kat_karsiligi" | "taahhut";
+  ruhsatSinifi: string;
+  ymoSinifi?: string;       // admin onaylıysa güncel sınıf
+  insaatAlaniM2: number;
+  isDeneyimiTipi: "kat_karsiligi" | "taahhut";
   taahhutBedeli?: number;
 }
 
@@ -254,77 +361,73 @@ export interface IsSonucu {
   ymo: number;
   kullanilanKatsayi: number;
   bantDurumu: "ufe" | "alt_sinir" | "ust_sinir";
-  bantAciklama: string;
+  sozlesmedenBugune: string;   // sade açıklama: "Sözleşme tarihindeki tutar: X → bugünkü değeri: Y"
 }
 
 export function isHesapla(g: IsGirdisi): IsSonucu {
   const sozDon = donemBul(g.sozlesmeTarihi);
-  const bfSoz = birimFiyat(g.ruhsatSinifi, sozDon);
-
-  // YMO: admin onaylıysa güncel sınıf, yoksa ruhsat sınıfı
+  const bfSoz  = birimFiyat(g.ruhsatSinifi, sozDon);
   const ymoSinif = g.ymoSinifi || g.ruhsatSinifi;
-  const bfBas = BM_2026[ymoSinif] || BM_2026[g.ruhsatSinifi] || 0;
-
+  const bfBas  = BM_2026[ymoSinif] || BM_2026[g.ruhsatSinifi] || 0;
   const ufeSoz = ufeEndeksi(g.sozlesmeTarihi);
   const ufeBas = 5029.76; // 2026 Şubat endeksi
 
-  if (g.tip === "taahhut") {
+  if (g.isDeneyimiTipi === "taahhut") {
     const bedel = g.taahhutBedeli || 0;
-    const ufeK = ufeBas / ufeSoz;
+    const ufeK  = ufeBas / ufeSoz;
+    const guncel = Math.round(bedel * ufeK);
     return {
-      belgeTutari: bedel, guncelTutar: Math.round(bedel * ufeK),
-      sozlesmeDonemi: sozDon, bfSoz: 0, bfBas: 0,
+      belgeTutari: bedel,
+      guncelTutar: guncel,
+      sozlesmeDonemi: sozDon,
+      bfSoz: 0, bfBas: 0,
       ufeSoz, ufeBas, ufeKatsayi: ufeK, ymo: 1,
-      kullanilanKatsayi: ufeK, bantDurumu: "ufe",
-      bantAciklama: `Taahhüt — ÜFE katsayısı: ${ufeK.toFixed(4)}`,
+      kullanilanKatsayi: ufeK,
+      bantDurumu: "ufe",
+      sozlesmedenBugune: `Sözleşme bedeli: ${bedel.toLocaleString("tr-TR")} ₺ → bugünkü değeri: ${guncel.toLocaleString("tr-TR")} ₺ (${ufeK.toFixed(2)}× artış)`,
     };
   }
 
   // Kat karşılığı
-  const belgeTutari = Math.round(g.alanM2 * bfSoz * 0.85);
+  const belgeTutari = Math.round(g.insaatAlaniM2 * bfSoz * 0.85);
   const ufeK = ufeBas / ufeSoz;
-  const ymo = bfSoz > 0 ? bfBas / bfSoz : 1;
-  const alt = ymo * 0.90;
-  const ust = ymo * 1.30;
+  const ymo  = bfSoz > 0 ? bfBas / bfSoz : 1;
+  const alt  = ymo * 0.90;
+  const ust  = ymo * 1.30;
 
   let kullanilanK = ufeK;
   let bantDurumu: "ufe" | "alt_sinir" | "ust_sinir" = "ufe";
-  let bantAciklama = "";
 
-  if (ufeK < alt) {
-    kullanilanK = alt;
-    bantDurumu = "alt_sinir";
-    bantAciklama = `ÜFE(${ufeK.toFixed(4)}) < alt sınır(${alt.toFixed(4)}) → alt sınır kullanıldı`;
-  } else if (ufeK > ust) {
-    kullanilanK = ust;
-    bantDurumu = "ust_sinir";
-    bantAciklama = `ÜFE(${ufeK.toFixed(4)}) > üst sınır(${ust.toFixed(4)}) → üst sınır kullanıldı`;
-  } else {
-    bantAciklama = `ÜFE(${ufeK.toFixed(4)}) bant içinde (${alt.toFixed(4)} – ${ust.toFixed(4)})`;
-  }
+  if      (ufeK < alt) { kullanilanK = alt; bantDurumu = "alt_sinir"; }
+  else if (ufeK > ust) { kullanilanK = ust; bantDurumu = "ust_sinir"; }
+
+  const guncel = Math.round(belgeTutari * kullanilanK);
 
   return {
     belgeTutari,
-    guncelTutar: Math.round(belgeTutari * kullanilanK),
+    guncelTutar: guncel,
     sozlesmeDonemi: sozDon,
     bfSoz, bfBas,
     ufeSoz, ufeBas, ufeKatsayi: ufeK,
     ymo, kullanilanKatsayi: kullanilanK,
-    bantDurumu, bantAciklama,
+    bantDurumu,
+    sozlesmedenBugune: `Sözleşme tarihindeki tutar: ${belgeTutari.toLocaleString("tr-TR")} ₺ → bugünkü değeri: ${guncel.toLocaleString("tr-TR")} ₺ (${kullanilanK.toFixed(2)}× artış)`,
   };
 }
 
-// ─── 3 YÖNTEMİ HESAPLA ───────────────────────────────────────────
+// ─── 3 Yöntemi Hesapla ───────────────────────────────────────────
 export interface TamHesaplaGirdisi {
   id: string;
   sozlesmeTarihi: string;
   iskanTarihi?: string;
   ruhsatSinifi: string;
-  ymoSinifi?: string;       // admin onaylıysa
-  alanM2: number;
-  tip: "kat_karsiligi" | "taahhut";
+  ymoSinifi?: string;
+  insaatAlaniM2: number;
+  isDeneyimiTipi: "kat_karsiligi" | "taahhut";
   taahhutBedeli?: number;
   adaParsel?: string;
+  yapiTipi?: string;
+  yapiYuksekligiM?: number;
 }
 
 export interface HesaplananIs extends TamHesaplaGirdisi {
@@ -334,11 +437,9 @@ export interface HesaplananIs extends TamHesaplaGirdisi {
 
 export interface TamHesaplama {
   isler: HesaplananIs[];
-
-  // Yöntem 1: Son 5 yıl toplamı
   y1: {
     son5YilIsler: HesaplananIs[];
-    eskiIsler: HesaplananIs[];   // 3× kilidi açan
+    eskiIsler: HesaplananIs[];
     toplamBrut: number;
     enBuyukIs: number;
     ucKatSiniri: number;
@@ -346,8 +447,6 @@ export interface TamHesaplama {
     toplamNet: number;
     grup: string;
   };
-
-  // Yöntem 2: Son 15 yılda en büyük × 2
   y2: {
     son15YilIsler: HesaplananIs[];
     enBuyukIs: HesaplananIs | null;
@@ -355,73 +454,56 @@ export interface TamHesaplama {
     toplam: number;
     grup: string;
   };
-
-  // Yöntem 3: Diploma
-  diploma: {
-    grup: string | null;
-    yil: number;
-    aciklama: string | null;
-  } | null;
-
-  // Seçilen yöntem
+  diploma: DiplomaHesap | null;
   tercihEdilenYontem: "son5" | "son15";
   tercihEdilenToplam: number;
   tercihEdilenGrup: string;
   birUstGrup: { grup: string; min: number } | null;
   eksikTutar: number;
+  bankaRefTutari: number | null;
+  isHacmi: IsHacmi;
+  maliYeterlilikGerekli: boolean;
 }
 
 export function tamHesapla(
   isGirisleri: TamHesaplaGirdisi[],
-  diploma?: { mezuniyetTarihi: string; bolum: string } | null
+  mezuniyetTarihi?: string | null
 ): TamHesaplama {
-  const bugun = new Date();
-  const be5 = new Date(bugun); be5.setFullYear(be5.getFullYear() - 5);
+  const bugun = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
+  const be5  = new Date(bugun); be5.setFullYear(be5.getFullYear() - 5);
   const be15 = new Date(bugun); be15.setFullYear(be15.getFullYear() - 15);
 
-  // Her iş için hesapla
   const isler: HesaplananIs[] = isGirisleri.map(g => ({
     ...g,
     sonuc: isHesapla(g),
     iskanDate: g.iskanTarihi ? new Date(g.iskanTarihi) : null,
   }));
 
-  // ── Yöntem 1: Son 5 yıl ──────────────────────────────────────
-  const son5 = isler.filter(x => x.iskanDate && x.iskanDate >= be5);
-  const eski = isler.filter(x => x.iskanDate && x.iskanDate < be5 && x.iskanDate >= be15);
-
+  // Yöntem 1: Son 5 yıl toplamı
+  const son5  = isler.filter(x => x.iskanDate && x.iskanDate >= be5);
+  const eski  = isler.filter(x => x.iskanDate && x.iskanDate < be5 && x.iskanDate >= be15);
   const toplamBrut = son5.reduce((s, x) => s + x.sonuc.guncelTutar, 0);
-  const enBuyuk5 = son5.length > 0 ? Math.max(...son5.map(x => x.sonuc.guncelTutar)) : 0;
-  const ucKat = enBuyuk5 * 3;
-
-  // 3× kilidi: eski iş varsa kilit açılır — ama sınır her zaman en büyüğün 3 katı
+  const enBuyuk5   = son5.length > 0 ? Math.max(...son5.map(x => x.sonuc.guncelTutar)) : 0;
+  const ucKat      = enBuyuk5 * 3;
   const kilidiAcildi = eski.length > 0;
-  const toplamNet = Math.min(toplamBrut, ucKat);
+  const toplamNet  = Math.min(toplamBrut, ucKat);
 
-  // ── Yöntem 2: Son 15 yıl en büyük × 2 ───────────────────────
+  // Yöntem 2: Son 15 yılda en büyük × 2
   const son15 = isler.filter(x => x.iskanDate && x.iskanDate >= be15);
   const enBuyuk15 = son15.length > 0
     ? son15.reduce((m, x) => x.sonuc.guncelTutar > m.sonuc.guncelTutar ? x : m, son15[0])
     : null;
   const y2Toplam = enBuyuk15 ? enBuyuk15.sonuc.guncelTutar * 2 : 0;
 
-  // ── Diploma ───────────────────────────────────────────────────
-  let dipSonuc: TamHesaplama["diploma"] = null;
-  if (diploma?.mezuniyetTarihi) {
-    const { grup, yil } = diplomaGrubu(diploma.mezuniyetTarihi);
-    dipSonuc = {
-      grup,
-      yil,
-      aciklama: `${yil} yıllık ${diploma.bolum === "insaat_muhendisligi" ? "İnşaat Mühendisliği" : "Mimarlık"} diploması → ${grup} Grubu. İş deneyimiyle toplanamaz.`,
-    };
-  }
+  // Yöntem 3: Diploma
+  const dipSonuc = mezuniyetTarihi ? diplomaGrubu(mezuniyetTarihi) : null;
 
-  // ── En avantajlı yöntemi seç ─────────────────────────────────
+  // En avantajlı yöntemi seç
   const tercih = y2Toplam > toplamNet ? "son15" : "son5";
   const tercihToplam = tercih === "son5" ? toplamNet : y2Toplam;
-  const tercihGrup = grupBul(tercihToplam);
-  const ust = birUstGrup(tercihGrup);
-  const eksik = ust ? Math.max(0, ust.min - tercihToplam) : 0;
+  const tercihGrup   = grupBul(tercihToplam);
+  const ust          = birUstGrup(tercihGrup);
+  const eksik        = ust ? Math.max(0, ust.min - tercihToplam) : 0;
 
   return {
     isler,
@@ -448,6 +530,9 @@ export function tamHesapla(
     tercihEdilenGrup: tercihGrup,
     birUstGrup: ust,
     eksikTutar: eksik,
+    bankaRefTutari: grupIcinBankaRef(tercihGrup),
+    isHacmi: grupIcinIsHacmi(tercihGrup),
+    maliYeterlilikGerekli: grupMaliYeterlilikGerektirir(tercihGrup),
   };
 }
 
