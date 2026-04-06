@@ -589,6 +589,93 @@ function TabMali({ company, onStatusChange }: { company: Company; onStatusChange
   );
 }
 
+/* ── ÖDEME SEKMESİ ── */
+function TabOdeme({ company, invoices }: { company: Company; invoices: Invoice[] }) {
+  const tlFmt = (n: number) => n.toLocaleString("tr-TR") + " ₺";
+  const totalPaid    = invoices.filter(i => i.status === "paid").reduce((s, i) => s + (i.amountNum || 0), 0);
+  const totalPending = invoices.filter(i => i.status !== "paid").reduce((s, i) => s + (i.amountNum || 0), 0);
+
+  const statusMap: Record<string, { label: string; cls: string }> = {
+    paid:    { label: "Ödendi",       cls: "bg-green-50 text-green-700 border-green-200" },
+    unpaid:  { label: "Bekliyor",     cls: "bg-amber-50 text-amber-700 border-amber-200" },
+    overdue: { label: "Vadesi Geçti", cls: "bg-red-50 text-red-600 border-red-200" },
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Özet */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-green-50 border border-green-100 rounded-2xl p-4">
+          <p className="text-green-600 text-xs mb-1">Ödenen</p>
+          <p className="text-green-800 text-xl font-bold">{tlFmt(totalPaid)}</p>
+        </div>
+        <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+          <p className="text-amber-600 text-xs mb-1">Bekleyen</p>
+          <p className="text-amber-800 text-xl font-bold">{tlFmt(totalPending)}</p>
+        </div>
+      </div>
+
+      {/* Fatura listesi */}
+      {invoices.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-[#E8E4DC] p-8 text-center">
+          <CreditCard className="w-10 h-10 text-[#E8E4DC] mx-auto mb-3" />
+          <p className="text-sm text-[#5A6478]">Henüz fatura bulunmuyor.</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-[#E8E4DC] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[#E8E4DC] bg-[#F8F7F4]">
+            <h3 className="text-sm font-semibold text-[#0B1D3A]">Faturalar</h3>
+          </div>
+          <div className="divide-y divide-[#F0EDE8]">
+            {invoices.map(inv => (
+              <div key={inv.id} className="px-5 py-4 flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-[#0B1D3A]">{inv.description}</p>
+                  <p className="text-xs text-[#5A6478] mt-0.5">
+                    {inv.date ? new Date(inv.date).toLocaleDateString("tr-TR") : ""}
+                    {inv.dueDate ? ` · Vade: ${new Date(inv.dueDate).toLocaleDateString("tr-TR")}` : ""}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-bold text-[#0B1D3A]">{tlFmt(inv.amountNum || 0)}</p>
+                  <span className={`inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${statusMap[inv.status]?.cls || statusMap.unpaid.cls}`}>
+                    {statusMap[inv.status]?.label || "Bekliyor"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Ödeme bilgileri */}
+      {totalPending > 0 && (
+        <div className="bg-[#0B1D3A] rounded-2xl p-5 text-white">
+          <h3 className="text-sm font-semibold mb-3">Ödeme Bilgileri</h3>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-white/60">Banka</span>
+              <span>Ziraat Bankası</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-white/60">Alıcı</span>
+              <span>Müteahhitlik Belgesi Danışmanlık</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-white/60">IBAN</span>
+              <span className="font-mono text-xs">TR00 0000 0000 0000 0000 0000 00</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-white/60">Açıklama</span>
+              <span className="text-[#C9952B] font-medium">{company.companyName}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── EVRAKLAR SEKMESİ ── */
 function TabEvraklar({ company, hizmetModeli, status, dbDocs }: { company: Company; hizmetModeli: "biz_yapiyoruz" | "musteri_yapiyor"; status: AppStatus; dbDocs: any[] }) {
   const raporYayinlandi = ["report_published","docs_in_progress","docs_complete","application_submitted","certificate_received"].includes(status);
