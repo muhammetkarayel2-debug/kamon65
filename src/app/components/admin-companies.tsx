@@ -1,19 +1,15 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
-  Building2, Search, Filter, Edit2, Eye, X, Save, ChevronDown,
-  MapPin, Phone, Mail, Hash, Calendar, Award, Users, CheckCircle
+  Building2, Search, Edit2, Eye, X, Save, ChevronDown,
+  Users, CheckCircle, AlertTriangle
 } from "lucide-react";
 import {
-  Company, loadFromStorage, saveToStorage,
-  MOCK_COMPANIES_KEY, COMPANY_TYPE_LABELS, formatDate, ALL_GROUPS,
-  AppStatus, STATUS_CONFIG
+  COMPANY_TYPE_LABELS, formatDate, ALL_GROUPS, STATUS_CONFIG
 } from "./admin-data";
 
 interface Props { refreshKey: number; onRefresh: () => void; }
 
-const GROUP_OPTIONS = ["Tümü", ...ALL_GROUPS, "Analiz", "Kooperatif"];
-
-function InfoRow({ label, value }: { label: string; value?: string }) {
+function InfoRow({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null;
   return (
     <div>
@@ -24,54 +20,75 @@ function InfoRow({ label, value }: { label: string; value?: string }) {
 }
 
 export function AdminCompanies({ refreshKey, onRefresh }: Props) {
-  const [search, setSearch] = useState("");
+  const [companies, setCompanies] = useState<any[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [search, setSearch]       = useState("");
   const [groupFilter, setGroupFilter] = useState("Tümü");
-  const [typeFilter, setTypeFilter] = useState("Tümü");
-  const [editModal, setEditModal] = useState<Company | null>(null);
-  const [viewModal, setViewModal] = useState<Company | null>(null);
-  const [editForm, setEditForm] = useState<Partial<Company>>({});
-  const [saveMsg, setSaveMsg] = useState("");
+  const [typeFilter, setTypeFilter]   = useState("Tümü");
+  const [viewModal, setViewModal] = useState<any | null>(null);
+  const [editModal, setEditModal] = useState<any | null>(null);
+  const [editForm, setEditForm]   = useState<any>({});
+  const [saveMsg, setSaveMsg]     = useState("");
+  const [saving, setSaving]       = useState(false);
 
-  const companies = useMemo(() => {
-    return loadFromStorage<Company[]>(MOCK_COMPANIES_KEY, []);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  const load = useCallback(async () => {
+    const { adminGetAllCompanies } = await import("./supabase-client");
+    const data = await adminGetAllCompanies();
+    setCompanies(data);
+    setLoading(false);
+  }, []);
 
-  const filtered = useMemo(() => {
-    return companies.filter(c => {
-      const q = search.toLowerCase();
-      const matchSearch = !q || c.companyName?.toLowerCase().includes(q) || c.taxId?.includes(q) || (c.userEmail || "").toLowerCase().includes(q);
-      const matchGroup = groupFilter === "Tümü" || c.group === groupFilter;
-      const matchType = typeFilter === "Tümü" || c.companyType === typeFilter;
-      return matchSearch && matchGroup && matchType;
-    });
-  }, [companies, search, groupFilter, typeFilter]);
+  useEffect(() => { load(); }, [refreshKey, load]);
 
-  const uniqueUsers = useMemo(() => {
-    const set = new Set(companies.map(c => c.userEmail || c.email));
-    return set.size;
-  }, [companies]);
+  const filtered = companies.filter(c => {
+    const q = search.toLowerCase();
+    const matchSearch = !q
+      || (c.company_name || "").toLowerCase().includes(q)
+      || (c.tax_id || "").includes(q)
+      || (c.user_email || "").toLowerCase().includes(q);
+    const matchGroup = groupFilter === "Tümü" || c.hesaplanan_grup === groupFilter;
+    const matchType  = typeFilter  === "Tümü" || c.company_type === typeFilter;
+    return matchSearch && matchGroup && matchType;
+  });
 
-  const openEdit = (c: Company) => {
+  const uniqueUsers = new Set(companies.map((c: any) => c.user_email).filter(Boolean)).size;
+
+  const openEdit = (c: any) => {
     setEditForm({ ...c });
     setEditModal(c);
     setSaveMsg("");
   };
 
-  const saveEdit = () => {
-    const all = loadFromStorage<Company[]>(MOCK_COMPANIES_KEY, []);
-    const updated = all.map(c => c.id === editModal?.id ? { ...c, ...editForm, updatedAt: new Date().toISOString() } : c);
-    saveToStorage(MOCK_COMPANIES_KEY, updated);
-    setSaveMsg("Kaydedildi ✓");
-    setTimeout(() => { setEditModal(null); onRefresh(); }, 800);
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      const { supabase } = await import("./supabase-client");
+      await supabase.from("companies").update({
+        company_name:   editForm.company_name,
+        tax_id:         editForm.tax_id,
+        phone:          editForm.phone,
+        email:          editForm.email,
+        kep_address:    editForm.kep_address,
+        hesaplanan_grup: editForm.hesaplanan_grup,
+        guncelleme:     new Date().toISOString(),
+      }).eq("id", editModal.id);
+      setSaveMsg("Kaydedildi ✓");
+      setTimeout(() => { setEditModal(null); onRefresh(); }, 800);
+    } catch (e: any) {
+      setSaveMsg("⚠ " + e.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const deleteCompany = (id: string) => {
+  const deleteCompany = async (id: string) => {
     if (!confirm("Bu şirketi silmek istediğinize emin misiniz?")) return;
-    const all = loadFromStorage<Company[]>(MOCK_COMPANIES_KEY, []);
-    saveToStorage(MOCK_COMPANIES_KEY, all.filter(c => c.id !== id));
+    const { supabase } = await import("./supabase-client");
+    await supabase.from("companies").delete().eq("id", id);
     onRefresh();
   };
+
+  const inputCls = "w-full px-3 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]";
 
   return (
     <div className="space-y-5">
@@ -82,27 +99,26 @@ export function AdminCompanies({ refreshKey, onRefresh }: Props) {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Filtreler */}
       <div className="flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#5A6478]" />
-          <input
-            value={search} onChange={e => setSearch(e.target.value)}
+          <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Şirket adı, VKN veya e-posta..."
-            className="w-full pl-9 pr-4 py-2.5 bg-white border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]"
-          />
+            className="w-full pl-9 pr-4 py-2.5 bg-white border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]" />
         </div>
         <div className="relative">
           <select value={groupFilter} onChange={e => setGroupFilter(e.target.value)}
             className="appearance-none bg-white border border-[#E8E4DC] rounded-lg px-4 py-2.5 pr-8 text-sm focus:outline-none focus:border-[#C9952B]">
-            {GROUP_OPTIONS.map(g => <option key={g}>{g}</option>)}
+            <option value="Tümü">Tüm Gruplar</option>
+            {ALL_GROUPS.map(g => <option key={g}>{g}</option>)}
           </select>
           <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#5A6478] pointer-events-none" />
         </div>
         <div className="relative">
           <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
             className="appearance-none bg-white border border-[#E8E4DC] rounded-lg px-4 py-2.5 pr-8 text-sm focus:outline-none focus:border-[#C9952B]">
-            <option value="Tümü">Tümü</option>
+            <option value="Tümü">Tüm Türler</option>
             <option value="sahis">Şahıs</option>
             <option value="limited_as">Limited / A.Ş.</option>
             <option value="kooperatif">Kooperatif</option>
@@ -111,7 +127,7 @@ export function AdminCompanies({ refreshKey, onRefresh }: Props) {
         </div>
       </div>
 
-      {/* Table */}
+      {/* Tablo */}
       <div className="bg-white rounded-2xl border border-[#E8E4DC] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -120,43 +136,45 @@ export function AdminCompanies({ refreshKey, onRefresh }: Props) {
                 <th className="text-left px-5 py-3 text-xs text-[#5A6478] font-medium">Şirket</th>
                 <th className="text-left px-4 py-3 text-xs text-[#5A6478] font-medium hidden sm:table-cell">Tür</th>
                 <th className="text-left px-4 py-3 text-xs text-[#5A6478] font-medium">Grup</th>
-                <th className="text-left px-4 py-3 text-xs text-[#5A6478] font-medium hidden md:table-cell">Durum / Konum</th>
+                <th className="text-left px-4 py-3 text-xs text-[#5A6478] font-medium hidden md:table-cell">Durum</th>
                 <th className="text-left px-4 py-3 text-xs text-[#5A6478] font-medium hidden lg:table-cell">Kullanıcı</th>
-                <th className="text-left px-4 py-3 text-xs text-[#5A6478] font-medium hidden lg:table-cell">Eklenme</th>
+                <th className="text-left px-4 py-3 text-xs text-[#5A6478] font-medium hidden lg:table-cell">Tarih</th>
                 <th className="text-right px-5 py-3 text-xs text-[#5A6478] font-medium">İşlem</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#F0EDE8]">
-              {filtered.length === 0 ? (
+              {loading ? (
+                <tr><td colSpan={7} className="text-center py-12 text-[#5A6478] text-sm">Yükleniyor...</td></tr>
+              ) : filtered.length === 0 ? (
                 <tr><td colSpan={7} className="text-center py-12 text-[#5A6478] text-sm">Sonuç bulunamadı.</td></tr>
-              ) : filtered.map(c => (
+              ) : filtered.map((c: any) => (
                 <tr key={c.id} className="hover:bg-[#F8F7F4]">
                   <td className="px-5 py-3">
-                    <p className="text-[#0B1D3A] font-medium text-sm">{c.companyName || "—"}</p>
-                    <p className="text-[#5A6478] text-xs">{c.taxId}</p>
+                    <p className="text-[#0B1D3A] font-medium text-sm">{c.company_name || "—"}</p>
+                    <p className="text-[#5A6478] text-xs">{c.tax_id}</p>
                   </td>
                   <td className="px-4 py-3 text-[#5A6478] text-xs hidden sm:table-cell">
-                    {COMPANY_TYPE_LABELS[c.companyType] || c.companyType}
+                    {COMPANY_TYPE_LABELS[c.company_type] || c.company_type || "—"}
                   </td>
                   <td className="px-4 py-3">
                     <span className="inline-block px-2 py-0.5 rounded-full bg-[#C9952B]/10 text-[#C9952B] text-xs font-bold">
-                      {c.group || "?"}
+                      {c.hesaplanan_grup || "—"}
                     </span>
                   </td>
                   <td className="px-4 py-3 hidden md:table-cell">
-                    {c.appStatus && STATUS_CONFIG[c.appStatus] ? (
-                      <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_CONFIG[c.appStatus].bg} ${STATUS_CONFIG[c.appStatus].color} ${STATUS_CONFIG[c.appStatus].border}`}>
-                        {STATUS_CONFIG[c.appStatus].label}
+                    {STATUS_CONFIG[c.app_status] ? (
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_CONFIG[c.app_status].bg} ${STATUS_CONFIG[c.app_status].color} ${STATUS_CONFIG[c.app_status].border}`}>
+                        {STATUS_CONFIG[c.app_status].label}
                       </span>
                     ) : (
-                      <span className="text-[#5A6478] text-xs">{c.location === "istanbul" ? "İstanbul" : c.city || "—"}</span>
+                      <span className="text-[#9CA3AF] text-xs">{c.app_status || "—"}</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-[#5A6478] text-xs hidden lg:table-cell truncate max-w-[150px]">
-                    {c.userEmail || c.email || "—"}
+                    {c.user_email || "—"}
                   </td>
                   <td className="px-4 py-3 text-[#5A6478] text-xs hidden lg:table-cell">
-                    {formatDate(c.createdAt)}
+                    {formatDate(c.olusturulma)}
                   </td>
                   <td className="px-5 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
@@ -181,60 +199,56 @@ export function AdminCompanies({ refreshKey, onRefresh }: Props) {
         </div>
       </div>
 
-      {/* View Modal */}
+      {/* Görüntüle Modal */}
       {viewModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setViewModal(null)}>
           <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="bg-gradient-to-r from-[#0B1D3A] to-[#122A54] p-6 rounded-t-2xl flex items-center justify-between">
               <div>
-                <h3 className="text-white font-bold text-base">{viewModal.companyName}</h3>
-                <p className="text-white/60 text-xs mt-0.5">{COMPANY_TYPE_LABELS[viewModal.companyType]} · {viewModal.group} Grubu</p>
+                <h3 className="text-white font-bold text-base">{viewModal.company_name}</h3>
+                <p className="text-white/60 text-xs mt-0.5">
+                  {COMPANY_TYPE_LABELS[viewModal.company_type] || viewModal.company_type}
+                  {viewModal.hesaplanan_grup ? ` · Grup ${viewModal.hesaplanan_grup}` : ""}
+                </p>
               </div>
-              <button onClick={() => setViewModal(null)} className="text-white/60 hover:text-white p-1"><X className="w-5 h-5" /></button>
+              <button onClick={() => setViewModal(null)} className="text-white/60 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6 grid sm:grid-cols-2 gap-5">
-              <InfoRow label="Vergi Kimlik No" value={viewModal.taxId} />
-              <InfoRow label="Telefon" value={viewModal.phone} />
-              <InfoRow label="E-posta" value={viewModal.email} />
-              <InfoRow label="Konum" value={viewModal.location === "istanbul" ? "İstanbul" : viewModal.city || "—"} />
-              <InfoRow label="Kuruluş Yılı" value={viewModal.foundingYear} />
-              <InfoRow label="KEP Adresi" value={viewModal.kepAddress} />
-              <InfoRow label="Hizmet" value={viewModal.serviceLabel} />
-              <InfoRow label="Belge Durumu" value={viewModal.isFirstTime === "first" ? "İlk Başvuru" : viewModal.isFirstTime === "renewal" ? "Yenileme" : viewModal.isFirstTime} />
-              <InfoRow label="Kullanıcı E-posta" value={viewModal.userEmail} />
-              <InfoRow label="Kayıt Tarihi" value={formatDate(viewModal.createdAt)} />
-              {viewModal.appStatus && STATUS_CONFIG[viewModal.appStatus] && (
+              <InfoRow label="Vergi Kimlik No"    value={viewModal.tax_id} />
+              <InfoRow label="Telefon"             value={viewModal.phone} />
+              <InfoRow label="E-posta"             value={viewModal.email} />
+              <InfoRow label="Konum"               value={viewModal.location === "istanbul" ? "İstanbul" : viewModal.city} />
+              <InfoRow label="KEP Adresi"          value={viewModal.kep_address} />
+              <InfoRow label="Hizmet"              value={viewModal.service_label} />
+              <InfoRow label="Belge Durumu"        value={viewModal.is_first_time === "first" ? "İlk Başvuru" : viewModal.is_first_time === "renewal" ? "Yenileme" : viewModal.is_first_time} />
+              <InfoRow label="Mevcut Grup"         value={viewModal.mevcut_grup} />
+              <InfoRow label="Mevcut Yetki No"     value={viewModal.mevcut_yetki_no} />
+              <InfoRow label="Kullanıcı E-posta"   value={viewModal.user_email} />
+              <InfoRow label="Kayıt Tarihi"        value={formatDate(viewModal.olusturulma)} />
+              {viewModal.app_status && STATUS_CONFIG[viewModal.app_status] && (
                 <div>
                   <span className="text-[#5A6478] text-xs block mb-0.5">Başvuru Durumu</span>
-                  <span className={`text-xs px-2.5 py-1 rounded-full border inline-block ${STATUS_CONFIG[viewModal.appStatus].bg} ${STATUS_CONFIG[viewModal.appStatus].color} ${STATUS_CONFIG[viewModal.appStatus].border}`}>
-                    {STATUS_CONFIG[viewModal.appStatus].label}
+                  <span className={`text-xs px-2.5 py-1 rounded-full border inline-block ${STATUS_CONFIG[viewModal.app_status].bg} ${STATUS_CONFIG[viewModal.app_status].color} ${STATUS_CONFIG[viewModal.app_status].border}`}>
+                    {STATUS_CONFIG[viewModal.app_status].label}
                   </span>
                 </div>
               )}
-              {viewModal.hesaplananGrup && (
+              {viewModal.hesaplanan_grup && (
                 <div>
                   <span className="text-[#5A6478] text-xs block mb-0.5">Hesaplanan Grup</span>
-                  <span className="text-[#C9952B] font-black text-xl">{viewModal.hesaplananGrup}</span>
+                  <span className="text-[#C9952B] font-black text-xl">{viewModal.hesaplanan_grup}</span>
                 </div>
               )}
             </div>
-            {viewModal.partners && viewModal.partners.length > 0 && (
+            {/* Ortaklar */}
+            {viewModal.partners?.length > 0 && (
               <div className="px-6 pb-6">
-                <p className="text-xs text-[#5A6478] mb-2 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Ortaklar / Yetkililer</p>
-                <div className="bg-[#F8F7F4] rounded-xl p-4 space-y-2.5">
-                  {viewModal.partners.map((p, i) => (
+                <p className="text-xs text-[#5A6478] mb-2 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Ortaklar</p>
+                <div className="bg-[#F8F7F4] rounded-xl p-4 space-y-2">
+                  {viewModal.partners.map((p: any, i: number) => (
                     <div key={i} className="flex items-center justify-between text-sm">
-                      <div>
-                        <span className="text-[#0B1D3A] font-medium">{p.name}</span>
-                        <span className="text-[#5A6478] text-xs ml-2">%{p.sharePercent}</span>
-                      </div>
-                      {p.tcNo ? (
-                        <span className="bg-[#0B1D3A]/8 text-[#0B1D3A] font-mono text-xs px-2.5 py-1 rounded-lg border border-[#E8E4DC]">
-                          TC: {p.tcNo}
-                        </span>
-                      ) : (
-                        <span className="text-[#5A6478] text-xs italic">TC girilmemiş</span>
-                      )}
+                      <span className="text-[#0B1D3A] font-medium">{p.name}</span>
+                      <span className="text-[#5A6478] text-xs">%{p.hisse} · TC: {p.tc || "—"}</span>
                     </div>
                   ))}
                 </div>
@@ -244,7 +258,7 @@ export function AdminCompanies({ refreshKey, onRefresh }: Props) {
         </div>
       )}
 
-      {/* Edit Modal */}
+      {/* Düzenle Modal */}
       {editModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setEditModal(null)}>
           <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -254,40 +268,41 @@ export function AdminCompanies({ refreshKey, onRefresh }: Props) {
             </div>
             <div className="p-5 space-y-4">
               {[
-                { label: "Şirket Adı", field: "companyName" },
-                { label: "Vergi Kimlik No", field: "taxId" },
-                { label: "Telefon", field: "phone" },
-                { label: "E-posta", field: "email" },
-                { label: "Kuruluş Yılı", field: "foundingYear" },
-                { label: "KEP Adresi", field: "kepAddress" },
-                { label: "Kullanıcı E-posta", field: "userEmail" },
+                { label: "Şirket Adı",    field: "company_name" },
+                { label: "Vergi No",      field: "tax_id" },
+                { label: "Telefon",       field: "phone" },
+                { label: "E-posta",       field: "email" },
+                { label: "KEP Adresi",    field: "kep_address" },
               ].map(({ label, field }) => (
                 <div key={field}>
                   <label className="block text-xs text-[#5A6478] mb-1">{label}</label>
-                  <input
-                    value={(editForm as Record<string, string>)[field] || ""}
-                    onChange={e => setEditForm(prev => ({ ...prev, [field]: e.target.value }))}
-                    className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]"
-                  />
+                  <input value={editForm[field] || ""}
+                    onChange={e => setEditForm((p: any) => ({ ...p, [field]: e.target.value }))}
+                    className={inputCls} />
                 </div>
               ))}
               <div>
-                <label className="block text-xs text-[#5A6478] mb-1">Grup</label>
-                <select
-                  value={editForm.group || ""}
-                  onChange={e => setEditForm(prev => ({ ...prev, group: e.target.value }))}
-                  className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]"
-                >
-                  {[...ALL_GROUPS, "Kooperatif", "Analiz"].map(g => <option key={g}>{g}</option>)}
+                <label className="block text-xs text-[#5A6478] mb-1">Hesaplanan Grup (Admin override)</label>
+                <select value={editForm.hesaplanan_grup || ""}
+                  onChange={e => setEditForm((p: any) => ({ ...p, hesaplanan_grup: e.target.value }))}
+                  className={inputCls}>
+                  <option value="">— Seçiniz —</option>
+                  {ALL_GROUPS.map(g => <option key={g}>{g}</option>)}
                 </select>
               </div>
             </div>
             <div className="p-5 border-t border-[#E8E4DC] flex items-center justify-between">
-              {saveMsg && <span className="text-green-600 text-sm flex items-center gap-1"><CheckCircle className="w-4 h-4" />{saveMsg}</span>}
+              {saveMsg && (
+                <span className={`text-sm flex items-center gap-1 ${saveMsg.startsWith("⚠") ? "text-amber-600" : "text-green-600"}`}>
+                  {saveMsg.startsWith("⚠") ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                  {saveMsg}
+                </span>
+              )}
               <div className="flex gap-3 ml-auto">
                 <button onClick={() => setEditModal(null)} className="px-4 py-2 text-sm text-[#5A6478] border border-[#E8E4DC] rounded-lg hover:bg-[#F8F7F4]">İptal</button>
-                <button onClick={saveEdit} className="px-4 py-2 text-sm bg-[#C9952B] hover:bg-[#B8862A] text-white rounded-lg flex items-center gap-1.5">
-                  <Save className="w-4 h-4" /> Kaydet
+                <button onClick={saveEdit} disabled={saving}
+                  className="px-4 py-2 text-sm bg-[#C9952B] hover:bg-[#B8862A] disabled:opacity-50 text-[#0B1D3A] rounded-lg flex items-center gap-1.5">
+                  <Save className="w-4 h-4" /> {saving ? "Kaydediliyor..." : "Kaydet"}
                 </button>
               </div>
             </div>
