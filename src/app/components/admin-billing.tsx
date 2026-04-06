@@ -1,103 +1,87 @@
-import { useState, useMemo } from "react";
-import { CreditCard, Search, CheckCircle, Clock, AlertTriangle, Plus, X, Save, ChevronDown } from "lucide-react";
-import { Company, Invoice, loadFromStorage, saveToStorage, MOCK_COMPANIES_KEY, MOCK_BILLING_KEY, formatDate } from "./admin-data";
+import { useState, useEffect, useCallback } from "react";
+import {
+  Search, CheckCircle, Clock, AlertTriangle,
+  Plus, X, Save, ChevronDown
+} from "lucide-react";
+import { formatDate } from "./admin-data";
 
 interface Props { refreshKey: number; onRefresh: () => void; }
 
-const DISCOUNTS_KEY = "admin_discounts";
-
-interface Discount {
-  id: string; companyId: string; aciklama: string;
-  indirimTipi: "sabit_tutar" | "yuzde"; indirimDegeri: number;
-  maxIndirimTl?: number; gecerliMi: boolean; uygulandiMi: boolean;
-}
-
-function StatusBadge({ status }: { status: Invoice["status"] }) {
-  const map = {
-    paid:    { cls: "bg-green-50 text-green-700 border-green-200",   label: "Ödendi",        icon: <CheckCircle className="w-3 h-3" /> },
-    unpaid:  { cls: "bg-amber-50 text-amber-700 border-amber-200",   label: "Bekliyor",      icon: <Clock className="w-3 h-3" /> },
-    overdue: { cls: "bg-red-50 text-red-600 border-red-200",         label: "Vadesi Geçti",  icon: <AlertTriangle className="w-3 h-3" /> },
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, { cls: string; label: string; icon: React.ReactNode }> = {
+    paid:    { cls: "bg-green-50 text-green-700 border-green-200",  label: "Ödendi",       icon: <CheckCircle className="w-3 h-3" /> },
+    unpaid:  { cls: "bg-amber-50 text-amber-700 border-amber-200",  label: "Bekliyor",     icon: <Clock className="w-3 h-3" /> },
+    overdue: { cls: "bg-red-50 text-red-600 border-red-200",        label: "Vadesi Geçti", icon: <AlertTriangle className="w-3 h-3" /> },
   };
-  const s = map[status];
+  const s = map[status] || map.unpaid;
   return <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${s.cls}`}>{s.icon}{s.label}</span>;
 }
 
 export function AdminBilling({ refreshKey, onRefresh }: Props) {
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"Tümü" | Invoice["status"]>("Tümü");
-  const [showModal, setShowModal] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [invoices, setInvoices]     = useState<any[]>([]);
+  const [companies, setCompanies]   = useState<any[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [search, setSearch]         = useState("");
+  const [statusFilter, setStatusFilter] = useState<"Tümü" | "unpaid" | "paid" | "overdue">("Tümü");
+  const [showModal, setShowModal]   = useState(false);
   const [nCompanyId, setNCompanyId] = useState("");
-  const [nDesc, setNDesc] = useState("");
-  const [nAmount, setNAmount] = useState("");
-  const [nDue, setNDue] = useState("");
-  const [saveMsg, setSaveMsg] = useState("");
+  const [nDesc, setNDesc]           = useState("");
+  const [nAmount, setNAmount]       = useState("");
+  const [nDue, setNDue]             = useState("");
+  const [saveMsg, setSaveMsg]       = useState("");
+  const [saving, setSaving]         = useState(false);
 
-  const { companies, allInvoices } = useMemo(() => {
-    const companies = loadFromStorage<Company[]>(MOCK_COMPANIES_KEY, []);
-    const allBilling = loadFromStorage<Record<string, Invoice[]>>(MOCK_BILLING_KEY, {});
-    const allInvoices: (Invoice & { companyName: string; companyId: string })[] = [];
-    companies.forEach(c => {
-      (allBilling[c.id] || []).forEach(inv => allInvoices.push({ ...inv, companyName: c.companyName || "—", companyId: c.id }));
-    });
-    allInvoices.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    return { companies, allInvoices };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  const load = useCallback(async () => {
+    const { adminGetAllBilling, adminGetAllCompanies } = await import("./supabase-client");
+    const [bills, comps] = await Promise.all([adminGetAllBilling(), adminGetAllCompanies()]);
+    setInvoices(bills);
+    setCompanies(comps);
+    setLoading(false);
+  }, []);
 
-  const getDiscount = (companyId: string) => {
-    const all = loadFromStorage<Discount[]>(DISCOUNTS_KEY, []);
-    return all.find(d => d.companyId === companyId && d.gecerliMi && !d.uygulandiMi);
+  useEffect(() => { load(); }, [refreshKey, load]);
+
+  const tl = (n: number) => n.toLocaleString("tr-TR") + " ₺";
+
+  const filtered = invoices.filter(inv => {
+    const q = search.toLowerCase();
+    const matchSearch = !q
+      || (inv.company_name || "").toLowerCase().includes(q)
+      || (inv.description || "").toLowerCase().includes(q);
+    const matchStatus = statusFilter === "Tümü" || inv.status === statusFilter;
+    return matchSearch && matchStatus;
+  });
+
+  const totals = {
+    total:   invoices.reduce((s, i) => s + (i.amount_num || 0), 0),
+    paid:    invoices.filter(i => i.status === "paid").reduce((s, i) => s + (i.amount_num || 0), 0),
+    pending: invoices.filter(i => i.status !== "paid").reduce((s, i) => s + (i.amount_num || 0), 0),
   };
 
-  const parseAmount = (a: string) => parseFloat(a.replace(/[^\d,]/g, "").replace(",", ".")) || 0;
-
-  const filtered = useMemo(() => {
-    return allInvoices.filter(inv => {
-      const q = search.toLowerCase();
-      const matchSearch = !q || inv.companyName.toLowerCase().includes(q) || inv.description?.toLowerCase().includes(q);
-      const matchStatus = statusFilter === "Tümü" || inv.status === statusFilter;
-      return matchSearch && matchStatus;
-    });
-  }, [allInvoices, search, statusFilter]);
-
-  const totals = useMemo(() => ({
-    total:   allInvoices.reduce((s, i) => s + parseAmount(i.amount), 0),
-    paid:    allInvoices.filter(i => i.status === "paid").reduce((s, i) => s + parseAmount(i.amount), 0),
-    pending: allInvoices.filter(i => i.status !== "paid").reduce((s, i) => s + parseAmount(i.amount), 0),
-  }), [allInvoices]);
-
-  const tl = (n: number) => n.toLocaleString("tr-TR", { minimumFractionDigits: 2 }) + " ₺";
-
-  const markPaid = (inv: Invoice & { companyId: string }) => {
-    const allBilling = loadFromStorage<Record<string, Invoice[]>>(MOCK_BILLING_KEY, {});
-    if (!allBilling[inv.companyId]) return;
-    allBilling[inv.companyId] = allBilling[inv.companyId].map(i =>
-      i.id === inv.id ? { ...i, status: "paid" } : i
-    );
-    saveToStorage(MOCK_BILLING_KEY, allBilling);
-
-    const disc = getDiscount(inv.companyId);
-    if (disc) {
-      const all = loadFromStorage<Discount[]>(DISCOUNTS_KEY, []);
-      saveToStorage(DISCOUNTS_KEY, all.map(d => d.id === disc.id ? { ...d, uygulandiMi: true, uygulama_tarihi: new Date().toISOString() } : d));
-    }
+  const markPaid = async (inv: any) => {
+    const { adminMarkPaid } = await import("./supabase-client");
+    await adminMarkPaid(inv.id);
     onRefresh();
   };
 
-  const addInvoice = () => {
+  const addInvoice = async () => {
     if (!nCompanyId || !nDesc || !nAmount) return;
-    const allBilling = loadFromStorage<Record<string, Invoice[]>>(MOCK_BILLING_KEY, {});
-    const companyBilling = allBilling[nCompanyId] || [];
-    companyBilling.push({
-      id: crypto.randomUUID(), companyId: nCompanyId,
-      date: new Date().toISOString(), dueDate: nDue || new Date(Date.now() + 14 * 86400000).toISOString(),
-      description: nDesc, amount: nAmount + " ₺", status: "unpaid",
-    });
-    allBilling[nCompanyId] = companyBilling;
-    saveToStorage(MOCK_BILLING_KEY, allBilling);
-    setSaveMsg("Kaydedildi");
-    setTimeout(() => { setSaveMsg(""); setShowModal(false); setNCompanyId(""); setNDesc(""); setNAmount(""); setNDue(""); onRefresh(); }, 700);
+    setSaving(true);
+    try {
+      const { adminAddBilling } = await import("./supabase-client");
+      const amountNum = parseInt(nAmount.replace(/\D/g, "")) || 0;
+      await adminAddBilling(nCompanyId, nDesc, amountNum, nDue || undefined);
+      setSaveMsg("Kaydedildi");
+      setTimeout(() => {
+        setSaveMsg(""); setShowModal(false);
+        setNCompanyId(""); setNDesc(""); setNAmount(""); setNDue("");
+        onRefresh();
+      }, 700);
+    } catch (e: any) {
+      setSaveMsg("⚠ " + (e.message || "Hata"));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const inputCls = "w-full px-3 py-2.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]";
@@ -107,7 +91,7 @@ export function AdminBilling({ refreshKey, onRefresh }: Props) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-[#0B1D3A] text-lg font-bold">Faturalar</h2>
-          <p className="text-[#5A6478] text-xs mt-0.5">{allInvoices.length} fatura</p>
+          <p className="text-[#5A6478] text-xs mt-0.5">{invoices.length} fatura</p>
         </div>
         <button onClick={() => setShowModal(true)}
           className="flex items-center gap-2 bg-[#C9952B] hover:bg-[#B8862A] text-[#0B1D3A] px-4 py-2.5 rounded-xl text-sm font-medium transition-colors">
@@ -118,9 +102,9 @@ export function AdminBilling({ refreshKey, onRefresh }: Props) {
       {/* Özet */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: "Toplam",    val: totals.total,   color: "text-[#0B1D3A]" },
-          { label: "Tahsil",    val: totals.paid,    color: "text-green-600" },
-          { label: "Bekleyen",  val: totals.pending, color: "text-amber-600" },
+          { label: "Toplam",   val: totals.total,   color: "text-[#0B1D3A]" },
+          { label: "Tahsil",   val: totals.paid,    color: "text-green-600" },
+          { label: "Bekleyen", val: totals.pending, color: "text-amber-600" },
         ].map(s => (
           <div key={s.label} className="bg-white rounded-xl border border-[#E8E4DC] p-4">
             <p className="text-xs text-[#5A6478] mb-1">{s.label}</p>
@@ -163,38 +147,36 @@ export function AdminBilling({ refreshKey, onRefresh }: Props) {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#F0EDE8]">
-              {filtered.length === 0 ? (
+              {loading ? (
+                <tr><td colSpan={6} className="text-center py-12 text-[#5A6478] text-sm">Yükleniyor...</td></tr>
+              ) : filtered.length === 0 ? (
                 <tr><td colSpan={6} className="text-center py-12 text-[#5A6478] text-sm">Fatura bulunamadı.</td></tr>
-              ) : filtered.map(inv => {
-                const disc = inv.status !== "paid" ? getDiscount(inv.companyId) : null;
-                return (
-                  <tr key={inv.id} className="hover:bg-[#F8F7F4]">
-                    <td className="px-5 py-3">
-                      <p className="text-[#0B1D3A] font-medium text-sm">{inv.companyName}</p>
-                      <p className="text-[#5A6478] text-xs">{formatDate(inv.date)}</p>
-                    </td>
-                    <td className="px-4 py-3 text-[#5A6478] text-xs hidden sm:table-cell max-w-[180px] truncate">{inv.description}</td>
-                    <td className="px-4 py-3">
-                      <p className="text-sm font-semibold text-[#0B1D3A]">{inv.amount}</p>
-                      {disc && (
-                        <p className="text-xs text-green-600 mt-0.5">
-                          İndirim: {disc.indirimTipi === "yuzde" ? `%${disc.indirimDegeri}` : `${disc.indirimDegeri.toLocaleString("tr-TR")} ₺`}
-                        </p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3"><StatusBadge status={inv.status} /></td>
-                    <td className="px-4 py-3 text-[#5A6478] text-xs hidden md:table-cell">{formatDate(inv.dueDate)}</td>
-                    <td className="px-5 py-3 text-right">
-                      {inv.status !== "paid" && (
-                        <button onClick={() => markPaid(inv)}
-                          className="text-xs bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 px-3 py-1.5 rounded-lg transition-colors">
-                          Ödendi İşaretle
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+              ) : filtered.map(inv => (
+                <tr key={inv.id} className="hover:bg-[#F8F7F4]">
+                  <td className="px-5 py-3">
+                    <p className="text-[#0B1D3A] font-medium text-sm">{inv.company_name}</p>
+                    <p className="text-[#5A6478] text-xs">{formatDate(inv.olusturulma)}</p>
+                  </td>
+                  <td className="px-4 py-3 text-[#5A6478] text-xs hidden sm:table-cell max-w-[180px] truncate">
+                    {inv.description}
+                  </td>
+                  <td className="px-4 py-3">
+                    <p className="text-sm font-semibold text-[#0B1D3A]">{tl(inv.amount_num || 0)}</p>
+                  </td>
+                  <td className="px-4 py-3"><StatusBadge status={inv.status} /></td>
+                  <td className="px-4 py-3 text-[#5A6478] text-xs hidden md:table-cell">
+                    {inv.due_date ? formatDate(inv.due_date) : "—"}
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    {inv.status !== "paid" && (
+                      <button onClick={() => markPaid(inv)}
+                        className="text-xs bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 px-3 py-1.5 rounded-lg transition-colors">
+                        Ödendi İşaretle
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -213,7 +195,7 @@ export function AdminBilling({ refreshKey, onRefresh }: Props) {
                 <label className="block text-xs text-[#5A6478] mb-1">Şirket <span className="text-red-400">*</span></label>
                 <select value={nCompanyId} onChange={e => setNCompanyId(e.target.value)} className={inputCls}>
                   <option value="">Şirket seçiniz</option>
-                  {companies.map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}
+                  {companies.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
                 </select>
               </div>
               <div>
@@ -230,12 +212,18 @@ export function AdminBilling({ refreshKey, onRefresh }: Props) {
               </div>
             </div>
             <div className="p-5 border-t border-[#E8E4DC] flex items-center justify-between">
-              {saveMsg && <span className="text-green-600 text-sm flex items-center gap-1"><CheckCircle className="w-4 h-4" />{saveMsg}</span>}
+              {saveMsg && (
+                <span className={`text-sm flex items-center gap-1 ${saveMsg.startsWith("⚠") ? "text-amber-600" : "text-green-600"}`}>
+                  {saveMsg.startsWith("⚠") ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                  {saveMsg}
+                </span>
+              )}
               <div className="flex gap-3 ml-auto">
-                <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-[#5A6478] border border-[#E8E4DC] rounded-lg hover:bg-[#F8F7F4]">İptal</button>
-                <button onClick={addInvoice} disabled={!nCompanyId || !nDesc || !nAmount}
+                <button onClick={() => setShowModal(false)}
+                  className="px-4 py-2 text-sm text-[#5A6478] border border-[#E8E4DC] rounded-lg hover:bg-[#F8F7F4]">İptal</button>
+                <button onClick={addInvoice} disabled={saving || !nCompanyId || !nDesc || !nAmount}
                   className="px-4 py-2 text-sm bg-[#C9952B] hover:bg-[#B8862A] disabled:bg-gray-200 text-[#0B1D3A] rounded-lg flex items-center gap-1.5">
-                  <Save className="w-4 h-4" /> Kaydet
+                  <Save className="w-4 h-4" /> {saving ? "Kaydediliyor..." : "Kaydet"}
                 </button>
               </div>
             </div>
