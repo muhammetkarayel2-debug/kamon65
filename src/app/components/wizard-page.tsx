@@ -122,7 +122,7 @@ export function WizardPage() {
   const [isHGrubu, setIsHGrubu] = useState(false);
 
   const STEPS_NORMAL = ["firma", "deneyim", "konum", "ozet"] as const;
-  const STEPS_H = ["firma", "evrak", "konum", "ozet"] as const;
+  const STEPS_H = ["firma", "deneyim", "konum", "ozet"] as const;
   type StepNormal = typeof STEPS_NORMAL[number];
   type StepH = typeof STEPS_H[number];
   type Step = StepNormal | StepH;
@@ -166,7 +166,6 @@ export function WizardPage() {
   const [location, setLocation] = useState<"" | "istanbul" | "istanbul_disi">("");
   const [city, setCity] = useState("");
   const [paket, setPaket] = useState("");
-  const [upsellKabul, setUpsellKabul] = useState<boolean | null>(null);
 
   const isLtd = companyType === "limited_as";
   const isKoop = companyType === "kooperatif";
@@ -200,12 +199,14 @@ export function WizardPage() {
     } else {
       setHasNone(false);
       setPaket("");
+      // Konum seçimini sıfırla — H grubundan çıkınca kullanıcı yeniden seçsin
+      setLocation("");
+      setCity("");
     }
-    setStep("firma");
+    // Deneyim adımındayken kalabilir — seçimi değiştirebilsin
+    if (step !== "deneyim") setStep("firma");
   };
 
-  /* Upsell gösterilmeli mi */
-  const showUpsell = location === "istanbul" && paket === "sadece_hesaplama";
 
   /* Validation */
   function validateStep(s: Step): string[] {
@@ -245,7 +246,6 @@ export function WizardPage() {
       if (!location) errs.push("Şirket faaliyet adresi");
       if (location === "istanbul_disi" && !city.trim()) errs.push("İl");
       if (!paket) errs.push("Hizmet paketi");
-      if (showUpsell && upsellKabul === null) errs.push("Başvuru tercihinizi seçiniz");
     }
     return errs;
   }
@@ -254,8 +254,8 @@ export function WizardPage() {
     const errs = validateStep(step);
     if (errs.length > 0) { setErrors(errs); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     setErrors([]);
-    const idx = STEPS.indexOf(step as any);
     if (step === "ozet") { handleFinish(); return; }
+    const idx = STEPS.indexOf(step as any);
     if (idx < STEPS.length - 1) setStep(STEPS[idx + 1]);
   }
   function handleBack() {
@@ -267,8 +267,7 @@ export function WizardPage() {
   async function saveCompany(userId: string) {
     const secilenPaket = PAKETLER[paket as keyof typeof PAKETLER];
     const hizmetModeli = (
-      paket === "hesaplama_basvuru" || paket === "h_grubu" ||
-      (paket === "sadece_hesaplama" && upsellKabul === true)
+      paket === "hesaplama_basvuru" || paket === "h_grubu"
     ) ? "biz_yapiyoruz" : "musteri_yapiyor";
 
     /* 1. Şirket kaydet / güncelle */
@@ -348,9 +347,6 @@ export function WizardPage() {
     const dueDate = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
 
     await adminAddBilling(company.id, secilenPaket?.label || paket, tutar, dueDate);
-    if (upsellKabul === true && paket === "sadece_hesaplama") {
-      await adminAddBilling(company.id, "Bakanlık Başvuru Hizmet Bedeli", 9000, dueDate);
-    }
   }
 
   function handleFinish() {
@@ -404,9 +400,26 @@ export function WizardPage() {
   const stepIdx = STEPS.indexOf(step as any);
   const S = { fontFamily: "Inter,-apple-system,sans-serif" };
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768;
+  const [showMobileModal, setShowMobileModal] = useState(isMobile);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F8F7F4", ...S }}>
+    <div style={{ minHeight: "100vh", background: "#F8F7F4", maxWidth: "100vw", overflowX: "hidden", ...S }}>
+      {/* Mobil uyarı popup */}
+      {showMobileModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setShowMobileModal(false)}>
+          <div style={{ background: "white", borderRadius: 16, maxWidth: 380, width: "100%", padding: "28px 24px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
+            <div style={{ width: 48, height: 48, borderRadius: "50%", background: "rgba(201,149,43,0.1)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+              <Info size={22} color="#C9952B" />
+            </div>
+            <h3 style={{ fontSize: 16, fontWeight: 600, color: "#0B1D3A", margin: "0 0 8px" }}>Bilgisayar Önerisi</h3>
+            <p style={{ fontSize: 13, color: "#5A6478", lineHeight: 1.6, margin: "0 0 20px" }}>Formu bilgisayarınızdan doldurmanızı öneririz. Mobilde de devam edebilirsiniz.</p>
+            <button onClick={() => setShowMobileModal(false)} style={{ width: "100%", padding: "11px 20px", borderRadius: 10, border: "none", background: "#0B1D3A", color: "white", fontSize: 13, fontWeight: 500, cursor: "pointer" }}>
+              Tamam, devam et
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Topbar */}
       <div style={{ background: "#0B1D3A", height: 52, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 32px" }}>
         <button onClick={() => navigate("/")} style={{ display: "flex", alignItems: "center", gap: 8, color: "rgba(255,255,255,0.55)", fontSize: 13, background: "none", border: "none", cursor: "pointer" }}>
@@ -419,16 +432,8 @@ export function WizardPage() {
         <div style={{ width: 120 }} />
       </div>
 
-      {/* Mobil bilgi notu */}
-      {isMobile && (
-        <div style={{ background: "rgba(201,149,43,0.08)", borderBottom: "1px solid rgba(201,149,43,0.2)", padding: "8px 16px", display: "flex", alignItems: "center", gap: 8 }}>
-          <Info size={13} color="#C9952B" />
-          <span style={{ fontSize: 11, color: "#7A6030" }}>Formu doldurmak için bilgisayarınızı kullanmanızı öneririz.</span>
-        </div>
-      )}
-
       {/* İki kolon */}
-      <div style={{ display: "flex", minHeight: "calc(100vh - 52px)" }}>
+      <div style={{ display: "flex", height: "calc(100vh - 52px)" }}>
         {/* Sidebar */}
         <div style={{ width: 260, background: "white", borderRight: "1px solid rgba(11,29,58,0.08)", padding: "28px 20px", display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
           <div style={{ fontSize: 11, fontWeight: 500, color: "#5A6478", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 14, padding: "0 8px" }}>Başvuru adımları</div>
@@ -458,8 +463,10 @@ export function WizardPage() {
         </div>
 
         {/* İçerik */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          <div style={{ flex: 1, padding: "36px 48px", maxWidth: 820 }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
+          {/* Kaydırılabilir içerik alanı */}
+          <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+          <div style={{ padding: "36px 48px", maxWidth: 820 }}>
 
             {/* Hata banner */}
             {errors.length > 0 && (
@@ -580,7 +587,7 @@ export function WizardPage() {
                       <div>
                         <p style={{ fontSize: 13, color: "#5A6478", margin: "0 0 8px" }}>Müteahhitlik belgesi daha önce alındı mı? *</p>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                          {[["first", "İlk kez alınacak"], ["renewal", "Yenileme / yükseltme"]].map(([v, l]) => (
+                          {[["renewal", "Yenileme / yükseltme"], ["first", "İlk kez alınacak"]].map(([v, l]) => (
                             <button key={v} onClick={() => setIsFirstTime(v as any)} style={{ padding: "11px 14px", borderRadius: 9, border: `1px solid ${isFirstTime === v ? "#C9952B" : "rgba(11,29,58,0.1)"}`, background: isFirstTime === v ? "rgba(201,149,43,0.08)" : "white", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, textAlign: "left" }}>
                               <div style={{ width: 13, height: 13, borderRadius: "50%", border: `2px solid ${isFirstTime === v ? "#C9952B" : "rgba(11,29,58,0.2)"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{isFirstTime === v && <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#C9952B" }} />}</div>
                               <span style={{ fontSize: 13, color: "#0B1D3A" }}>{l}</span>
@@ -600,7 +607,7 @@ export function WizardPage() {
                             </div>
                             <div>
                               <label style={{ display: "block", fontSize: 11, color: "#5A6478", marginBottom: 4 }}>Mevcut yetki belgesi no *</label>
-                              <input value={mevcutYetkiNo} onChange={e => setMevcutYetkiNo(e.target.value.slice(0, 50))} placeholder="2024/İST/12345" style={{ width: "100%", padding: "8px 10px", background: "#F3F0EB", border: "1px solid transparent", borderRadius: 7, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                              <input value={mevcutYetkiNo} onChange={e => setMevcutYetkiNo(e.target.value.replace(/[^0-9]/g, "").slice(0, 16))} placeholder="0034223287615047" style={{ width: "100%", padding: "8px 10px", background: "#F3F0EB", border: "1px solid transparent", borderRadius: 7, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
                             </div>
                           </div>
                         )}
@@ -630,7 +637,7 @@ export function WizardPage() {
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {[
                         { k: "yapiIsi", checked: hasYapiIsi, set: () => { setHasYapiIsi(!hasYapiIsi); if (!hasYapiIsi) setHasNone(false); }, l: "Yapım işim var", s: "Tamamlanan inşaat projelerim var" },
-                        { k: "diploma", checked: hasDiploma, set: () => { setHasDiploma(!hasDiploma); if (!hasDiploma) setHasNone(false); }, l: "Diploma başvurusu", s: "Ortağın/sahibin diplomasıyla başvuru" },
+                        { k: "diploma", checked: hasDiploma, set: () => { setHasDiploma(!hasDiploma); if (!hasDiploma) { setHasNone(false); if (companyType === "sahis") setDipName(companyName); } }, l: "Diploma başvurusu", s: "Ortağın/sahibin diplomasıyla başvuru" },
                         { k: "none", checked: hasNone, set: () => { const n = !hasNone; setHasNone(n); if (n) { setHasYapiIsi(false); setHasDiploma(false); handleHGrubuToggle(true); } else { handleHGrubuToggle(false); } }, l: "Belge / iş deneyimim yok", s: "H grubu yetki belgesi başvurusu yapacağım" },
                       ].map(({ k, checked, set, l, s }) => (
                         <button key={k} onClick={set} style={{ padding: "12px 14px", borderRadius: 10, border: `1px solid ${checked ? "#C9952B" : "rgba(11,29,58,0.1)"}`, background: checked ? "rgba(201,149,43,0.08)" : "white", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "flex-start", gap: 10 }}>
@@ -644,46 +651,64 @@ export function WizardPage() {
                   </div>
                 )}
 
-                {/* İş girişleri */}
-                {(hasYapiIsi || isUpgrade) && (
-                  <div style={{ marginBottom: 22 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                      <div style={{ fontSize: 11, fontWeight: 500, color: "#C9952B", letterSpacing: "0.06em", textTransform: "uppercase" }}>İş deneyim girişleri</div>
-                      <button onClick={() => { const n = mkExp(); setExps(p => [...p.map(x => ({ ...x, acik: false })), n]); }} style={{ display: "flex", alignItems: "center", gap: 5, background: "#0B1D3A", color: "white", border: "none", padding: "7px 14px", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>
-                        <Plus size={13} /> İş ekle
+                {/* İş girişleri — 3 bölümlü tasarım */}
+                {(hasYapiIsi || isUpgrade) && (() => {
+                  const katExps = exps.filter(e => e.isDeneyimiTipi !== "taahhut");
+                  const taahhutExps = exps.filter(e => e.isDeneyimiTipi === "taahhut");
+
+                  const isExpComplete = (e: typeof exps[0]) => {
+                    if (e.isDeneyimiTipi === "taahhut") return !!(e.sozlesmeTarihi && e.taahhutBedeli && e.iskanFile);
+                    return !!(e.sozlesmeTarihi && e.insaatAlaniM2 && e.yapiSinifi && e.iskanFile);
+                  };
+                  const canAddNew = (list: typeof exps) => list.length === 0 || list.every(isExpComplete);
+
+                  const addKat = () => {
+                    if (!canAddNew(katExps)) { alert("Lütfen mevcut kat karşılığı işini tamamlayın."); return; }
+                    const n = mkExp(); n.isDeneyimiTipi = "kat_karsiligi"; setExps(p => [...p.map(x => ({ ...x, acik: false })), n]);
+                  };
+                  const addTaahhut = () => {
+                    if (!canAddNew(taahhutExps)) { alert("Lütfen mevcut taahhüt işini tamamlayın."); return; }
+                    const n = mkExp(); n.isDeneyimiTipi = "taahhut"; setExps(p => [...p.map(x => ({ ...x, acik: false })), n]);
+                  };
+
+                  const SectionHeader = ({ icon, color, title, count, onAdd }: { icon: string; color: string; title: string; count: number; onAdd: () => void }) => (
+                    <div style={{ padding: "12px 16px", background: "#F8F7F4", borderBottom: "1px solid rgba(11,29,58,0.07)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 24, height: 24, borderRadius: 8, background: color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>{icon}</div>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: "#0B1D3A" }}>{title}</span>
+                        {count > 0 && <span style={{ fontSize: 10, background: "rgba(201,149,43,0.1)", color: "#C9952B", padding: "2px 6px", borderRadius: 20, fontWeight: 700 }}>{count}</span>}
+                      </div>
+                      <button onClick={onAdd} style={{ fontSize: 12, color: "#C9952B", border: "1px solid rgba(201,149,43,0.2)", background: "none", padding: "4px 10px", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                        <Plus size={12} /> Ekle
                       </button>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {exps.map((e, i) => {
-                        const tarihHata = e.sozlesmeTarihi && e.iskanTarihi && new Date(e.sozlesmeTarihi) > new Date(e.iskanTarihi);
-                        return (
-                          <div key={e.id} style={{ border: `1px solid ${e.acik ? "#C9952B" : "rgba(11,29,58,0.09)"}`, borderRadius: 11, overflow: "hidden", background: "white" }}>
-                            {/* Satır özeti */}
-                            <div onClick={() => toggleAcik(e.id)} style={{ display: "flex", alignItems: "center", height: 46, cursor: "pointer", background: e.acik ? "rgba(201,149,43,0.03)" : "white" }}>
-                              <div style={{ width: 44, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                <div style={{ width: 21, height: 21, borderRadius: "50%", background: e.acik ? "#C9952B" : "#0B1D3A", color: "white", fontSize: 11, fontWeight: 500, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</div>
-                              </div>
-                              <span style={{ fontSize: 12, fontWeight: 500, color: e.acik ? "#C9952B" : "#0B1D3A", whiteSpace: "nowrap", paddingRight: 4 }}>{e.isDeneyimiTipi === "kat_karsiligi" ? "Kat karşılığı" : "Taahhüt / ihale"}</span>
-                              <div style={{ width: 1, height: 20, background: "rgba(11,29,58,0.08)", margin: "0 12px", flexShrink: 0 }} />
-                              <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-                                {[
-                                  { l: "Ada/Parsel", v: e.adaParsel || "—" },
-                                  { l: "Sözleşme", v: e.sozlesmeTarihi || "—" },
-                                  { l: "Alan", v: e.insaatAlaniM2 ? `${e.insaatAlaniM2} m²` : "—" },
-                                  { l: "Sınıf", v: e.yapiSinifi || "—" },
-                                  { l: "İskan", v: e.iskanFile ? "✓ Yüklendi" : "Yüklenmedi", color: e.iskanFile ? "#16a34a" : "#EF4444" },
-                                ].map(({ l, v, color }) => (
-                                  <div key={l} style={{ display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 11px", borderRight: "1px solid rgba(11,29,58,0.06)" }}>
-                                    <div style={{ fontSize: 10, color: "#9CA3AF", marginBottom: 1, whiteSpace: "nowrap" }}>{l}</div>
-                                    <div style={{ fontSize: 12, color: color || "#0B1D3A", fontWeight: 500, whiteSpace: "nowrap" }}>{v}</div>
-                                  </div>
-                                ))}
-                              </div>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 12px", flexShrink: 0 }}>
-                                {e.acik ? <ChevronUp size={14} color="#5A6478" /> : <ChevronDown size={14} color="#5A6478" />}
-                                {exps.length > 1 && <button onClick={ev => { ev.stopPropagation(); setExps(p => p.filter(x => x.id !== e.id)); }} style={{ width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "none", cursor: "pointer", color: "#EF4444" }}><Trash2 size={13} /></button>}
-                              </div>
+                  );
+
+                  const ExpRow = ({ e, i }: { e: typeof exps[0]; i: number }) => {
+                    const tarihHata = e.sozlesmeTarihi && e.iskanTarihi && new Date(e.sozlesmeTarihi) > new Date(e.iskanTarihi);
+                    return (
+                      <div key={e.id} style={{ border: `1px solid ${e.acik ? "#C9952B" : "rgba(11,29,58,0.09)"}`, borderRadius: 11, overflow: "hidden", background: "white" }}>
+                        {/* Satır özeti */}
+                        <div onClick={() => toggleAcik(e.id)} style={{ display: "flex", alignItems: "center", padding: "12px 14px", cursor: "pointer", background: e.acik ? "rgba(201,149,43,0.03)" : "white", gap: 12 }}>
+                          <div style={{ width: 32, height: 32, borderRadius: 10, background: e.isDeneyimiTipi === "taahhut" ? "#C9952B" : "#0B1D3A", color: "white", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 13, fontWeight: 500, color: "#0B1D3A" }}>{e.adaParsel || `${e.isDeneyimiTipi === "taahhut" ? "Taahhüt" : "Kat karşılığı"} ${i + 1}`}</span>
+                              {e.yapiSinifi && e.isDeneyimiTipi === "kat_karsiligi" && <span style={{ fontSize: 10, background: "rgba(201,149,43,0.1)", color: "#C9952B", padding: "1px 6px", borderRadius: 4, fontWeight: 700 }}>{e.yapiSinifi}</span>}
+                              {e.iskanFile && <span style={{ fontSize: 10, background: "#F0FDF4", color: "#15803d", padding: "1px 6px", borderRadius: 4 }}>İskan ✓</span>}
                             </div>
+                            <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#5A6478", marginTop: 3 }}>
+                              {e.sozlesmeTarihi && <span>Sözleşme: {e.sozlesmeTarihi}</span>}
+                              {e.iskanTarihi && <span>İskan: {e.iskanTarihi}</span>}
+                              {e.insaatAlaniM2 && <span>{e.insaatAlaniM2} m²</span>}
+                              {e.taahhutBedeli && <span>{e.taahhutBedeli} ₺</span>}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                            {e.acik ? <ChevronUp size={14} color="#5A6478" /> : <ChevronDown size={14} color="#5A6478" />}
+                            {exps.length > 1 && <button onClick={ev => { ev.stopPropagation(); setExps(p => p.filter(x => x.id !== e.id)); }} style={{ width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "none", cursor: "pointer", color: "#EF4444" }}><Trash2 size={13} /></button>}
+                          </div>
+                        </div>
 
                             {/* Açık form */}
                             {e.acik && (
@@ -785,31 +810,57 @@ export function WizardPage() {
                             )}
                           </div>
                         );
-                      })}
+                  };
+
+                  return (
+                    <div style={{ marginBottom: 22, display: "flex", flexDirection: "column", gap: 14 }}>
+                      {/* Kat Karşılığı İşleri */}
+                      <div style={{ border: "1px solid rgba(11,29,58,0.09)", borderRadius: 14, overflow: "hidden" }}>
+                        <SectionHeader icon="🏗" color="#0B1D3A" title="Kat Karşılığı İşleri" count={katExps.length} onAdd={addKat} />
+                        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                          {katExps.length > 0 ? katExps.map((e, i) => ExpRow({ e, i })) : (
+                            <p style={{ fontSize: 12, color: "#5A6478", textAlign: "center", padding: "16px 0" }}>Henüz kat karşılığı iş eklenmemiş.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Taahhüt İşleri */}
+                      <div style={{ border: "1px solid rgba(11,29,58,0.09)", borderRadius: 14, overflow: "hidden" }}>
+                        <SectionHeader icon="📄" color="#C9952B" title="Taahhüt İşleri" count={taahhutExps.length} onAdd={addTaahhut} />
+                        <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                          {taahhutExps.length > 0 ? taahhutExps.map((e, i) => ExpRow({ e, i })) : (
+                            <p style={{ fontSize: 12, color: "#5A6478", textAlign: "center", padding: "16px 0" }}>Henüz taahhüt işi eklenmemiş.</p>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div onClick={() => { const n = mkExp(); setExps(p => [...p.map(x => ({ ...x, acik: false })), n]); }} style={{ border: "1.5px dashed rgba(11,29,58,0.12)", borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 9, cursor: "pointer", marginTop: 6 }}>
-                      <Plus size={14} color="#5A6478" />
-                      <span style={{ fontSize: 13, color: "#5A6478" }}>Yeni iş ekle</span>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Diploma */}
                 {hasDiploma && !isUpgrade && (
                   <div style={{ marginBottom: 22 }}>
                     <div style={{ fontSize: 11, fontWeight: 500, color: "#C9952B", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>Diploma bilgileri<div style={{ flex: 1, height: 1, background: "rgba(201,149,43,0.2)" }} /></div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, background: "white", border: "1px solid rgba(11,29,58,0.09)", borderRadius: 10, padding: 16 }}>
-                      <div style={{ gridColumn: "1/-1" }}>
-                        <label style={{ display: "block", fontSize: 11, color: "#5A6478", marginBottom: 5 }}>{companyType === "sahis" ? "Ad Soyad" : "Diploma sahibi ortağın adı"} *</label>
-                        {isLtd && partners.length > 0 ? (
-                          <select value={dipName} onChange={e => { setDipName(e.target.value); const p = partners.find(x => x.name === e.target.value); if (p) setDipYil(p.hisse ? "" : ""); }} style={{ width: "100%", padding: "8px 11px", background: "#F3F0EB", border: "1px solid transparent", borderRadius: 7, fontSize: 13, outline: "none" }}>
-                            <option value="">Seçiniz</option>
-                            {partners.filter(p => p.name.trim()).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                          </select>
-                        ) : (
-                          <input value={dipName} onChange={e => setDipName(e.target.value.slice(0, 60))} placeholder="Ad Soyad" style={{ width: "100%", padding: "8px 11px", background: "#F3F0EB", border: "1px solid transparent", borderRadius: 7, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
-                        )}
-                      </div>
+                      {companyType !== "sahis" && (
+                        <div style={{ gridColumn: "1/-1" }}>
+                          <label style={{ display: "block", fontSize: 11, color: "#5A6478", marginBottom: 5 }}>Diploma sahibi ortağın adı *</label>
+                          {isLtd && partners.length > 0 ? (
+                            <select value={dipName} onChange={e => { setDipName(e.target.value); const p = partners.find(x => x.name === e.target.value); if (p) setDipYil(p.hisse ? "" : ""); }} style={{ width: "100%", padding: "8px 11px", background: "#F3F0EB", border: "1px solid transparent", borderRadius: 7, fontSize: 13, outline: "none" }}>
+                              <option value="">Seçiniz</option>
+                              {partners.filter(p => p.name.trim()).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                            </select>
+                          ) : (
+                            <input value={dipName} onChange={e => setDipName(e.target.value.slice(0, 60))} placeholder="Ad Soyad" style={{ width: "100%", padding: "8px 11px", background: "#F3F0EB", border: "1px solid transparent", borderRadius: 7, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                          )}
+                        </div>
+                      )}
+                      {companyType === "sahis" && (
+                        <div style={{ gridColumn: "1/-1" }}>
+                          <label style={{ display: "block", fontSize: 11, color: "#5A6478", marginBottom: 5 }}>Diploma sahibi</label>
+                          <div style={{ padding: "8px 11px", background: "#F3F0EB", borderRadius: 7, fontSize: 13, color: "#0B1D3A" }}>{companyName || "—"}</div>
+                        </div>
+                      )}
                       <div>
                         <label style={{ display: "block", fontSize: 11, color: "#5A6478", marginBottom: 5 }}>Bölüm *</label>
                         <select value={dipBolum} onChange={e => setDipBolum(e.target.value as any)} style={{ width: "100%", padding: "8px 11px", background: "#F3F0EB", border: "1px solid transparent", borderRadius: 7, fontSize: 13, outline: "none" }}>
@@ -863,7 +914,9 @@ export function WizardPage() {
             {/* ─── ADIM: KONUM ─── */}
             {step === "konum" && (() => {
               const istPaketler = isHGrubu
-                ? [{ key: "h_grubu", label: "H Grubu Başvuru", fiyat: "12.000 ₺", aciklama: "H grubu yetki belgesi başvurusu", tags: ["Başvuru"], popular: false }]
+                ? (location === "istanbul"
+                  ? [{ key: "h_grubu", label: "H Grubu Başvuru", fiyat: "12.000 ₺", aciklama: "H grubu yetki belgesi başvurusu", tags: ["Başvuru"], popular: false }]
+                  : [{ key: "bilgi_alma", label: "Bilgi Alma Danışmanlığı", fiyat: "7.000 ₺", aciklama: "Süreç hakkında bilgi alın, ne yapmanız gerektiğini öğrenin", tags: ["Danışmanlık"], popular: false }])
                 : [
                   { key: "bilgi_alma", label: "Bilgi Alma Danışmanlığı", fiyat: "7.000 ₺", aciklama: "Süreç hakkında bilgi alın, ne yapmanız gerektiğini öğrenin", tags: ["Danışmanlık"], popular: false },
                   { key: "sadece_hesaplama", label: "İş Deneyim Hesaplama", fiyat: "11.000 ₺", aciklama: "İş deneyiminiz hesaplanır, size rapor gönderilir", tags: ["Hesaplama"], popular: false },
@@ -889,10 +942,10 @@ export function WizardPage() {
                   <div style={{ marginBottom: 20 }}>
                     <div style={{ fontSize: 11, fontWeight: 500, color: "#C9952B", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>Şirket faaliyet adresi<div style={{ flex: 1, height: 1, background: "rgba(201,149,43,0.2)" }} /></div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <button onClick={() => { setLocation("istanbul"); if (!isHGrubu) setPaket(""); setUpsellKabul(null); }} style={{ padding: "14px 16px", borderRadius: 10, border: `1px solid ${location === "istanbul" ? "#C9952B" : "rgba(11,29,58,0.1)"}`, background: location === "istanbul" ? "rgba(201,149,43,0.08)" : "white", cursor: "pointer", textAlign: "left" }}>
+                      <button onClick={() => { setLocation("istanbul"); if (isHGrubu) setPaket("h_grubu"); else setPaket(""); }} style={{ padding: "14px 16px", borderRadius: 10, border: `1px solid ${location === "istanbul" ? "#C9952B" : "rgba(11,29,58,0.1)"}`, background: location === "istanbul" ? "rgba(201,149,43,0.08)" : "white", cursor: "pointer", textAlign: "left" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Building2 size={15} color={location === "istanbul" ? "#C9952B" : "#5A6478"} /><div><p style={{ fontSize: 13, color: "#0B1D3A", margin: "0 0 1px", fontWeight: 500 }}>İstanbul</p><p style={{ fontSize: 11, color: "#5A6478", margin: 0 }}>Yüz yüze hizmet dahil</p></div></div>
                       </button>
-                      <button onClick={() => { setLocation("istanbul_disi"); if (!isHGrubu) { /* bilgi_alma veya sadece_hesaplama olabilir */ } }} style={{ padding: "14px 16px", borderRadius: 10, border: `1px solid ${location === "istanbul_disi" ? "#C9952B" : "rgba(11,29,58,0.1)"}`, background: location === "istanbul_disi" ? "rgba(201,149,43,0.08)" : "white", cursor: "pointer", textAlign: "left" }}>
+                      <button onClick={() => { setLocation("istanbul_disi"); if (isHGrubu) setPaket("bilgi_alma"); else setPaket("sadece_hesaplama"); }} style={{ padding: "14px 16px", borderRadius: 10, border: `1px solid ${location === "istanbul_disi" ? "#C9952B" : "rgba(11,29,58,0.1)"}`, background: location === "istanbul_disi" ? "rgba(201,149,43,0.08)" : "white", cursor: "pointer", textAlign: "left" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Building2 size={15} color="#5A6478" /><div><p style={{ fontSize: 13, color: "#0B1D3A", margin: "0 0 1px", fontWeight: 500 }}>İstanbul Dışı</p><p style={{ fontSize: 11, color: "#5A6478", margin: 0 }}>Uzaktan hizmet</p></div></div>
                       </button>
                     </div>
@@ -924,7 +977,7 @@ export function WizardPage() {
                       {(location === "istanbul" || isHGrubu) && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                           {filtreliPaketler.map(pk => (
-                            <button key={pk.key} onClick={() => { setPaket(pk.key); setUpsellKabul(null); }} style={{ padding: "16px 18px", borderRadius: 12, border: `${paket === pk.key ? "2px solid #C9952B" : "1px solid rgba(11,29,58,0.1)"}`, background: paket === pk.key ? "rgba(201,149,43,0.06)" : "white", cursor: "pointer", textAlign: "left", position: "relative" }}>
+                            <button key={pk.key} onClick={() => { setPaket(pk.key); }} style={{ padding: "16px 18px", borderRadius: 12, border: `${paket === pk.key ? "2px solid #C9952B" : "1px solid rgba(11,29,58,0.1)"}`, background: paket === pk.key ? "rgba(201,149,43,0.06)" : "white", cursor: "pointer", textAlign: "left", position: "relative" }}>
                               {pk.popular && <span style={{ position: "absolute", top: -10, left: 14, background: "#C9952B", color: "#0B1D3A", fontSize: 11, fontWeight: 500, padding: "2px 10px", borderRadius: 20 }}>Popüler</span>}
                               <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                                 <div style={{ width: 17, height: 17, borderRadius: "50%", border: `2px solid ${paket === pk.key ? "#C9952B" : "rgba(11,29,58,0.2)"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
@@ -944,17 +997,6 @@ export function WizardPage() {
                         </div>
                       )}
 
-                      {/* Upsell — sadece hesaplama + istanbul */}
-                      {showUpsell && (
-                        <div style={{ marginTop: 14, background: "rgba(11,29,58,0.03)", border: "1px solid rgba(11,29,58,0.1)", borderRadius: 12, padding: "16px 18px" }}>
-                          <p style={{ fontSize: 13, fontWeight: 500, color: "#0B1D3A", margin: "0 0 4px" }}>Başvuruyu siz yapalım mı?</p>
-                          <p style={{ fontSize: 12, color: "#5A6478", margin: "0 0 12px" }}>Bakanlık başvurusunu sizin adınıza +9.000 ₺ farkla tamamlarız.</p>
-                          <div style={{ display: "flex", gap: 8 }}>
-                            <button onClick={() => setUpsellKabul(true)} style={{ padding: "8px 18px", borderRadius: 8, border: `1px solid ${upsellKabul === true ? "#C9952B" : "rgba(11,29,58,0.1)"}`, background: upsellKabul === true ? "rgba(201,149,43,0.08)" : "white", cursor: "pointer", fontSize: 13, color: "#0B1D3A", fontWeight: upsellKabul === true ? 500 : 400 }}>Evet, başvuruyu siz yapın (+9.000 ₺)</button>
-                            <button onClick={() => setUpsellKabul(false)} style={{ padding: "8px 18px", borderRadius: 8, border: `1px solid ${upsellKabul === false ? "#0B1D3A" : "rgba(11,29,58,0.1)"}`, background: upsellKabul === false ? "rgba(11,29,58,0.06)" : "white", cursor: "pointer", fontSize: 13, color: "#0B1D3A" }}>Hayır, kendim yapacağım</button>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
@@ -1022,16 +1064,45 @@ export function WizardPage() {
                 <div style={{ background: "#0B1D3A", borderRadius: 12, padding: "16px 18px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div><p style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, margin: "0 0 3px" }}>Seçilen paket</p><p style={{ color: "white", fontSize: 14, fontWeight: 500, margin: 0 }}>{PAKETLER[paket as keyof typeof PAKETLER]?.label || paket}</p></div>
-                    <div style={{ textAlign: "right" }}><p style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, margin: "0 0 3px" }}>Toplam</p><p style={{ color: "#C9952B", fontSize: 18, fontWeight: 700, margin: 0 }}>{PAKETLER[paket as keyof typeof PAKETLER]?.fiyat || "—"}{upsellKabul === true ? " + 9.000 ₺" : ""}</p></div>
+                    <div style={{ textAlign: "right" }}><p style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, margin: "0 0 3px" }}>Toplam</p><p style={{ color: "#C9952B", fontSize: 18, fontWeight: 700, margin: 0 }}>{PAKETLER[paket as keyof typeof PAKETLER]?.fiyat || "—"}</p></div>
                   </div>
                   <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, margin: "8px 0 0" }}>KDV dahildir</p>
                 </div>
+
+                {/* Hesap oluşturma — wizard akışının devamı */}
+                {showAuth && (
+                  <div style={{ marginTop: 20 }}>
+                    <div style={{ fontSize: 11, fontWeight: 500, color: "#C9952B", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>Hesap bilgileri<div style={{ flex: 1, height: 1, background: "rgba(201,149,43,0.2)" }} /></div>
+                    <p style={{ fontSize: 12, color: "#5A6478", margin: "0 0 14px" }}>Başvurunuzu takip edebilmeniz için bir hesap oluşturun.</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div style={{ gridColumn: "1/-1" }}>
+                        <label style={{ display: "block", fontSize: 11, color: "#5A6478", marginBottom: 4 }}>E-posta *</label>
+                        <input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="ornek@email.com"
+                          style={{ width: "100%", padding: "9px 12px", background: "#F3F0EB", border: "1px solid transparent", borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: 11, color: "#5A6478", marginBottom: 4 }}>Şifre *</label>
+                        <input type="password" value={authPass} onChange={e => setAuthPass(e.target.value)} placeholder="En az 6 karakter"
+                          style={{ width: "100%", padding: "9px 12px", background: "#F3F0EB", border: "1px solid transparent", borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: 11, color: "#5A6478", marginBottom: 4 }}>Şifre tekrar *</label>
+                        <input type="password" value={authPass2} onChange={e => setAuthPass2(e.target.value)} placeholder="Şifreyi tekrar girin"
+                          style={{ width: "100%", padding: "9px 12px", background: "#F3F0EB", border: "1px solid transparent", borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                      </div>
+                    </div>
+                    {authErr && (
+                      <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#B91C1C", marginTop: 10 }}>{authErr}</div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
+          </div>{/* ← kaydırılabilir içerik sonu */}
 
-          {/* Footer */}
-          <div style={{ borderTop: "1px solid rgba(11,29,58,0.08)", padding: "14px 48px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "white" }}>
+          {/* Footer — her zaman altta sabit */}
+          <div style={{ borderTop: "1px solid rgba(11,29,58,0.08)", padding: "14px 48px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "white", flexShrink: 0 }}>
             <div style={{ display: "flex", gap: 5 }}>
               {STEPS.map((_, i) => (
                 <div key={i} style={{ height: 6, borderRadius: 3, background: i < stepIdx ? "#C9952B" : i === stepIdx ? "#0B1D3A" : "rgba(11,29,58,0.15)", width: i === stepIdx ? 20 : 6, transition: "all 0.2s" }} />
@@ -1040,90 +1111,20 @@ export function WizardPage() {
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               {stepIdx > 0 && <button onClick={handleBack} style={{ padding: "9px 20px", borderRadius: 10, border: "1px solid rgba(11,29,58,0.15)", background: "white", color: "#0B1D3A", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}><ArrowLeft size={13} /> Geri</button>}
-              <button onClick={handleNext} style={{ padding: "9px 24px", borderRadius: 10, border: "none", background: "#0B1D3A", color: "white", fontSize: 13, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-                {step === "ozet" ? "Başvuruyu Tamamla" : "Devam et"} <ArrowRight size={13} />
+              <button onClick={step === "ozet" && showAuth ? handleAuth : handleNext} disabled={step === "ozet" && showAuth && (!authEmail || !authPass || !authPass2 || authLoading)} style={{ padding: "9px 24px", borderRadius: 10, border: "none", background: step === "ozet" && showAuth ? "#C9952B" : "#0B1D3A", color: step === "ozet" && showAuth ? "#0B1D3A" : "white", fontSize: 13, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, opacity: step === "ozet" && showAuth && (!authEmail || !authPass || !authPass2) ? 0.5 : 1 }}>
+                {step === "ozet" ? (showAuth ? (authLoading ? "Oluşturuluyor..." : "Kaydol & Devam Et") : "Başvuruyu Tamamla") : "Devam et"} <ArrowRight size={13} />
               </button>
             </div>
           </div>
 
-          {/* Referans şeridi */}
-          <ReferansSeridi />
+          {/* Referans şeridi — her zaman altta sabit */}
+          <div style={{ flexShrink: 0 }}>
+            <ReferansSeridi />
+          </div>
         </div>
       </div>
 
-      {/* Auth Modal */}
-      {showAuth && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setShowAuth(false)}>
-          <div style={{ background: "white", borderRadius: 16, maxWidth: 420, width: "100%", overflow: "hidden" }} onClick={e => e.stopPropagation()}>
-            <div style={{ background: "#0B1D3A", padding: "20px 24px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <Award size={20} color="#C9952B" />
-                  <h3 style={{ color: "white", fontSize: 17, fontWeight: 500, margin: 0 }}>Hesap oluşturun</h3>
-                </div>
-                <button onClick={() => setShowAuth(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", display: "flex" }}><X size={18} /></button>
-              </div>
-              <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 12, margin: "6px 0 0" }}>Raporunuzu görüntülemek ve sürecinizi takip etmek için hesap oluşturun.</p>
-            </div>
-
-            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
-              {/* Google */}
-              <button onClick={async () => {
-                setAuthLoading(true);
-                try {
-                  /* Wizard verisini sessionStorage'a geçici sakla — Google callback sonrası dashboard'da okuyacağız */
-                  sessionStorage.setItem("pending_wizard_paket", paket);
-                  sessionStorage.setItem("pending_wizard_upsell", String(upsellKabul));
-                  await supabase.auth.signInWithOAuth({
-                    provider: "google",
-                    options: { redirectTo: `${window.location.origin}/dashboard` },
-                  });
-                } catch (e: any) { setAuthErr(e.message || "Hata oluştu"); setAuthLoading(false); }
-              }} style={{ width: "100%", background: "white", color: "#0B1D3A", padding: "11px", borderRadius: 10, border: "1.5px solid rgba(11,29,58,0.15)", fontSize: 13, fontWeight: 500, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-                <svg width="18" height="18" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                </svg>
-                Google ile Devam Et
-              </button>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ flex: 1, height: 1, background: "rgba(11,29,58,0.08)" }} />
-                <span style={{ fontSize: 11, color: "#9CA3AF" }}>veya e-posta ile</span>
-                <div style={{ flex: 1, height: 1, background: "rgba(11,29,58,0.08)" }} />
-              </div>
-
-              {[
-                ["Ad Soyad (isteğe bağlı)", authName, (v: string) => setAuthName(v), "text", "Adınız"],
-                ["E-posta *", authEmail, (v: string) => setAuthEmail(v), "email", "ornek@email.com"],
-                ["Şifre *", authPass, (v: string) => setAuthPass(v), "password", "En az 6 karakter"],
-                ["Şifre tekrar *", authPass2, (v: string) => setAuthPass2(v), "password", "Şifreyi tekrar girin"],
-              ].map(([l, v, s, t, ph]) => (
-                <div key={l as string}>
-                  <label style={{ display: "block", fontSize: 11, color: "#5A6478", marginBottom: 4 }}>{l as string}</label>
-                  <input type={t as string} value={v as string} onChange={e => (s as Function)(e.target.value)} placeholder={ph as string}
-                    style={{ width: "100%", padding: "9px 12px", background: "#F8F7F4", border: "1px solid rgba(11,29,58,0.08)", borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
-                </div>
-              ))}
-
-              {authErr && (
-                <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#B91C1C" }}>{authErr}</div>
-              )}
-
-              <button onClick={handleAuth} disabled={authLoading || !authEmail || !authPass || !authPass2}
-                style={{ width: "100%", background: "#C9952B", color: "#0B1D3A", padding: "11px", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 500, cursor: "pointer", opacity: authLoading || !authEmail || !authPass || !authPass2 ? 0.5 : 1 }}>
-                {authLoading ? "Oluşturuluyor..." : "Hesap Oluştur & Devam Et"}
-              </button>
-
-              <p style={{ fontSize: 11, color: "#9CA3AF", textAlign: "center", margin: 0 }}>
-                Kayıt olarak <span style={{ textDecoration: "underline", cursor: "pointer" }}>Kullanım Koşullarını</span> kabul etmiş olursunuz.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Auth Inline — showAuth true olduğunda özet içeriğinin yerine göster */}
     </div>
   );
 }

@@ -254,6 +254,30 @@ export function AdminHesaplama({ refreshKey, onRefresh }: Props) {
             )}
           </div>
 
+          {/* Şirket bilgi kartı */}
+          {selectedCompany && (
+            <div className="bg-white rounded-2xl border border-[#E8E4DC] p-5">
+              <h3 className="text-sm font-semibold text-[#0B1D3A] mb-3">Firma Bilgileri</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { l: "Unvan", v: selectedCompany.company_name },
+                  { l: "Firma tipi", v: selectedCompany.company_type === "limited_as" ? "Limited / A.Ş." : selectedCompany.company_type === "sahis" ? "Şahıs" : selectedCompany.company_type },
+                  { l: "Vergi no", v: selectedCompany.tax_id },
+                  { l: "Telefon", v: selectedCompany.phone },
+                  { l: "E-posta", v: selectedCompany.email },
+                  { l: "Konum", v: selectedCompany.location === "istanbul" ? "İstanbul" : selectedCompany.city },
+                  { l: "Paket", v: selectedCompany.service_label || selectedCompany.selected_service || "—" },
+                  { l: "Hizmet modeli", v: selectedCompany.hizmet_modeli === "biz_yapiyoruz" ? "Biz yapıyoruz" : "Müşteri yapıyor" },
+                ].map(({ l, v }) => (
+                  <div key={l}>
+                    <p className="text-[10px] text-[#5A6478] uppercase tracking-wide">{l}</p>
+                    <p className="text-xs font-medium text-[#0B1D3A] mt-0.5">{v || "—"}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Seçili şirket */}
           {selectedCompany && (() => {
             /* companyFull'dan iş deneyimlerini oku — Supabase alan adları */
@@ -330,8 +354,11 @@ export function AdminHesaplama({ refreshKey, onRefresh }: Props) {
                                       {(e.isDeneyimiTipi || e.is_deneyimi_tipi) === "kat_karsiligi" ? "Kat karşılığı" : "Taahhüt"} · {e.adaParsel || e.ada_parsel || "Ada/Parsel belirtilmemiş"}
                                     </p>
                                     <p className="text-xs text-[#5A6478] mt-0.5">
-                                      Sözleşme: {e.sozlesmeTarihi || "—"} · Ruhsat sınıfı: {ruhsat}
+                                      Sözleşme: {e.sozlesmeTarihi || "—"} · İskan: {e.iskanTarihi || "—"} · Sınıf: {ruhsat}
                                       {sinifOnay && sinifOnay !== ruhsat && <span className="text-amber-600"> → Admin: {sinifOnay}</span>}
+                                      {e.insaatAlaniM2 ? ` · ${e.insaatAlaniM2} m²` : ""}
+                                      {e.yapiYuksekligiM && e.yapiYuksekligiM !== "0" ? ` · ${e.yapiYuksekligiM}m` : ""}
+                                      {e.yapiTipi ? ` · ${e.yapiTipi}` : ""}
                                     </p>
                                   </div>
                                 </div>
@@ -438,17 +465,30 @@ export function AdminHesaplama({ refreshKey, onRefresh }: Props) {
                     {sonuclar.isler.length > 0 && (
                       <div className="border border-[#E8E4DC] rounded-xl overflow-hidden">
                         <div className="bg-[#F8F7F4] px-4 py-2.5 text-xs font-medium text-[#0B1D3A]">İş Detayları</div>
-                        {sonuclar.isler.map((is: any, i: number) => (
-                          <div key={is.id || i} className="px-4 py-3 border-t border-[#F0EDE8] text-xs">
-                            <div className="flex items-center justify-between mb-1">
-                              <p className="font-medium text-[#0B1D3A]">İş {i + 1} · {is.adaParsel || "—"}</p>
-                              <p className="font-bold text-[#C9952B]">{tlSade(is.sonuc?.guncelTutar || 0)}</p>
+                        {sonuclar.isler.map((is: any, i: number) => {
+                          const s = is.sonuc || {};
+                          const tipi = is.isDeneyimiTipi === "taahhut" ? "Taahhüt" : "Kat karşılığı";
+                          const artisYuzde = s.kullanilanKatsayi ? `${((s.kullanilanKatsayi - 1) * 100).toFixed(0)}%` : "";
+                          const bantMap: Record<string, string> = { ufe: "ÜFE", alt_sinir: "Alt sınır", ust_sinir: "Üst sınır" };
+                          return (
+                            <div key={is.id || i} className="px-4 py-3 border-t border-[#F0EDE8] text-xs">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-medium text-[#0B1D3A]">{is.adaParsel || `İş ${i + 1}`}</p>
+                                  <span className="text-[10px] bg-[#F0EDE8] text-[#5A6478] px-1.5 py-0.5 rounded">{tipi}</span>
+                                </div>
+                                <p className="font-bold text-[#C9952B]">{tlSade(s.guncelTutar || 0)}</p>
+                              </div>
+                              <div className="grid grid-cols-4 gap-2 mt-1.5 mb-1">
+                                <div><p className="text-[#9CA3AF]">Eski tutar</p><p className="text-[#0B1D3A]">{tlSade(s.belgeTutari || 0)}</p></div>
+                                <div><p className="text-[#9CA3AF]">Güncel tutar</p><p className="text-[#C9952B] font-medium">{tlSade(s.guncelTutar || 0)}</p></div>
+                                <div><p className="text-[#9CA3AF]">Artış</p><p className="text-[#0B1D3A]">{s.kullanilanKatsayi?.toFixed(2)}× ({artisYuzde})</p></div>
+                                <div><p className="text-[#9CA3AF]">Yöntem</p><p className="text-[#0B1D3A]">{bantMap[s.bantDurumu] || "—"}</p></div>
+                              </div>
+                              <p className="text-[#5A6478]">{s.sozlesmedenBugune}</p>
                             </div>
-                            <p className="text-[#5A6478]">
-                              {is.sonuc?.sozlesmedenBugune || `Belge: ${tlSade(is.sonuc?.belgeTutari || 0)} → Güncel: ${tlSade(is.sonuc?.guncelTutar || 0)}`}
-                            </p>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
 

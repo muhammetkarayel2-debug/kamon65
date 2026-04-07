@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   FolderOpen, Search, ChevronDown, CheckCircle, X, AlertTriangle,
-  Clock, Upload, Send, FileText, Download
+  Clock, Upload, Send, FileText, Download, Eye
 } from "lucide-react";
+import { PdfViewer } from "./pdf-viewer";
 import { formatDate } from "./admin-data";
 
 interface Props { refreshKey: number; onRefresh: () => void; }
@@ -38,6 +39,7 @@ export function AdminDocuments({ refreshKey, onRefresh }: Props) {
   const [gonderNot, setGonderNot]             = useState("");
   const [gonderTip, setGonderTip]             = useState<"fatura"|"barkod"|"dekont"|"diger">("fatura");
   const [gonderFile, setGonderFile]           = useState<File | null>(null);
+  const [viewingPdf, setViewingPdf]           = useState<{ url: string; name: string } | null>(null);
   const [gonderMsg, setGonderMsg]             = useState("");
   const [gonderSaving, setGonderSaving]       = useState(false);
 
@@ -209,10 +211,16 @@ export function AdminDocuments({ refreshKey, onRefresh }: Props) {
                       <div className="flex items-center gap-1.5">
                         <p className="text-xs font-medium text-[#0B1D3A] truncate max-w-[150px]">{d.dosya_adi}</p>
                         {d.dosya_url && (
-                          <a href={d.dosya_url} target="_blank" rel="noreferrer"
-                            className="text-[#C9952B] hover:text-[#B8862A] shrink-0">
-                            <Download className="w-3.5 h-3.5" />
-                          </a>
+                          <>
+                            <button onClick={() => setViewingPdf({ url: d.dosya_url, name: d.dosya_adi || "Belge" })}
+                              className="text-[#C9952B] hover:text-[#B8862A] shrink-0" title="Görüntüle">
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                            <a href={d.dosya_url} target="_blank" rel="noreferrer"
+                              className="text-[#5A6478] hover:text-[#0B1D3A] shrink-0" title="İndir">
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
+                          </>
                         )}
                       </div>
                     ) : <span className="text-[#9CA3AF] text-xs">—</span>}
@@ -397,6 +405,9 @@ export function AdminDocuments({ refreshKey, onRefresh }: Props) {
           </div>
         </div>
       )}
+
+      {/* PDF Viewer */}
+      {viewingPdf && <PdfViewer url={viewingPdf.url} fileName={viewingPdf.name} onClose={() => setViewingPdf(null)} />}
     </div>
   );
 }

@@ -4,9 +4,10 @@ import {
   Award, BarChart3, Building2, FileText, CreditCard, FolderOpen,
   Send, CheckCircle, Lock, Clock, AlertTriangle, ChevronRight,
   LogOut, Plus, Upload, Eye, Download, X, Info, Users,
-  ArrowRight, RefreshCw, Trash2, Edit2, Save, Check, ExternalLink, ChevronDown, ChevronUp
+  ArrowRight, RefreshCw, Trash2, Edit2, Save, Check, ExternalLink, ChevronDown, ChevronUp, Phone
 } from "lucide-react";
 import { useAuth } from "./auth-context";
+import { PdfViewer } from "./pdf-viewer";
 
 /* ─────────────────────────────────────────────────────────────
    STORAGE HELPERS  (Supabase'e geçildi — sadece local state için localStorage)
@@ -59,8 +60,9 @@ interface Company {
   // Dashboard durumu
   appStatus?: AppStatus;
   hizmetModeli?: "biz_yapiyoruz" | "musteri_yapiyor";
-  basvuruTeklifiGosterildi?: boolean;
-  basvuruTeklifiKabul?: boolean;
+  kepAddress?: string;
+  isFirstTime?: string;
+  [key: string]: any;
 }
 
 interface Invoice {
@@ -186,7 +188,7 @@ const STATUS_INFO: Record<AppStatus, { label: string; color: string; bg: string 
 /* ─────────────────────────────────────────────────────────────
    EVRAK LİSTESİ ÜRETİCİ — güncel evrak açıklamaları
 ───────────────────────────────────────────────────────────── */
-function buildDocList(company: Company, hizmetModeli: "biz_yapiyoruz" | "musteri_yapiyor"): DocItem[] {
+function buildDocList(company: Company, hizmetModeli: "biz_yapiyoruz" | "musteri_yapiyor", sonRapor?: any): DocItem[] {
   const biz = hizmetModeli === "biz_yapiyoruz";
   const sahis = company.companyType === "sahis";
   const tuzel = company.companyType === "limited_as" || company.companyType === "kooperatif";
@@ -219,8 +221,21 @@ function buildDocList(company: Company, hizmetModeli: "biz_yapiyoruz" | "musteri
   }
 
   /* ── GRUP 2: İş deneyim evrakları — her iş için ayrı ── */
+  /* Rapor varsa sadece kullanılan işlerin evraklarını iste */
+  const usedExpIds = new Set<string>();
+  if (sonRapor) {
+    const tercihR = sonRapor.tercih_yontem || sonRapor.tercihYontem || sonRapor.tercihEdilenYontem;
+    if (tercihR === "son5") {
+      ((sonRapor.y1?.son5YilIsler || sonRapor.is_detaylari || [])).forEach((x: any) => { if (x.id) usedExpIds.add(x.id); });
+    } else if (tercihR === "son15") {
+      const eb = sonRapor.y2?.enBuyukIs;
+      if (eb?.id) usedExpIds.add(eb.id);
+    }
+  }
+  const hasRaporFilter = sonRapor && usedExpIds.size > 0;
+
   if (qual?.hasYapiIsi && qual?.experiences?.length > 0) {
-    qual.experiences.forEach((e: any, i: number) => {
+    qual.experiences.filter((e: any) => !hasRaporFilter || usedExpIds.has(e.id)).forEach((e: any, i: number) => {
       const isNo = i + 1;
       const isLabel = e.adaParsel ? `Ada/Parsel: ${e.adaParsel}` : `İş ${isNo}`;
       const isGrp = `İş deneyimi — ${isLabel}`;
@@ -316,9 +331,10 @@ function DocDurumBadge({ durum }: { durum: DocItem["durum"] }) {
 ───────────────────────────────────────────────────────────── */
 
 /* ── ANALİZ ── */
-function TabAnaliz({ company, status }: { company: Company; status: AppStatus }) {
-  const locked = ["report_published","docs_in_progress","docs_complete","application_submitted","certificate_received"].includes(status);
+function TabAnaliz({ company, status, setActiveTab }: { company: Company; status: AppStatus; setActiveTab?: (t: DashboardTab) => void }) {
   const qual = company.qualifications;
+  const expCount = (qual?.experiences || []).length;
+  const hasDip = qual?.hasDiploma && qual?.diploma;
 
   return (
     <div className="space-y-5">
@@ -347,7 +363,7 @@ function TabAnaliz({ company, status }: { company: Company; status: AppStatus })
           </div>
         )}
 
-        {status === "report_published" || status === "docs_in_progress" || status === "docs_complete" || status === "application_submitted" || status === "certificate_received" ? (
+        {["report_published","docs_in_progress","docs_complete","application_submitted","certificate_received"].includes(status) && (
           <div className="bg-green-50 border border-green-100 rounded-xl p-4 flex items-start gap-3">
             <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
             <div>
@@ -355,134 +371,465 @@ function TabAnaliz({ company, status }: { company: Company; status: AppStatus })
               <p className="text-xs text-green-600 mt-0.5">Detayları Rapor sekmesinden inceleyebilirsiniz.</p>
             </div>
           </div>
-        ) : null}
+        )}
       </div>
 
-      {/* İş deneyimi özeti */}
-      {qual && (
-        <div className="bg-white rounded-2xl border border-[#E8E4DC] overflow-hidden">
-          <div className="px-5 py-4 border-b border-[#E8E4DC] flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-[#0B1D3A]">İş deneyimi girişleri</h3>
-            {!locked && (
-              <button className="text-xs text-[#C9952B] hover:underline flex items-center gap-1">
-                <Plus className="w-3.5 h-3.5" /> Yeni ekle
+      {/* İş deneyimi özeti — Firma sekmesine yönlendirme */}
+      {(() => {
+        return (
+          <div className="bg-white rounded-2xl border border-[#E8E4DC] p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-[#0B1D3A]">İş Deneyimi & Diploma</h3>
+              <div className="flex items-center gap-3 text-xs text-[#5A6478]">
+                <span>{expCount} iş deneyimi</span>
+                {hasDip && <span>· Diploma mevcut</span>}
+              </div>
+            </div>
+            <p className="text-xs text-[#5A6478] mb-3">İş deneyimi ve diploma bilgilerinizi Firma sekmesinden yönetebilirsiniz.</p>
+            {setActiveTab && (
+              <button onClick={() => setActiveTab("firma")} className="text-xs text-[#C9952B] hover:underline font-medium flex items-center gap-1">
+                <ArrowRight className="w-3.5 h-3.5" /> Firma sekmesine git
               </button>
             )}
           </div>
-
-          {qual.hasKatKarsiligi && qual.experiences?.length > 0 ? (
-            <div className="divide-y divide-[#F0EDE8]">
-              {qual.experiences.map((exp: any, i: number) => (
-                <div key={i} className="px-5 py-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-[#0B1D3A]">
-                      Kat karşılığı işi {i + 1}
-                      {exp.buildingClass && <span className="ml-2 text-xs text-[#C9952B] font-bold">{exp.buildingClass}</span>}
-                    </p>
-                    <p className="text-xs text-[#5A6478] mt-0.5">
-                      {exp.contractDate && `Sözleşme: ${exp.contractDate}`}
-                      {exp.totalArea && ` · ${exp.totalArea} m²`}
-                    </p>
-                  </div>
-                  {!locked && (
-                    <div className="flex items-center gap-1">
-                      <button className="p-1.5 text-[#5A6478] hover:text-[#C9952B] rounded-lg hover:bg-[#C9952B]/10 transition-colors">
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button className="p-1.5 text-[#5A6478] hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-                  {locked && <span className="text-xs text-[#5A6478]"><Lock className="w-3 h-3 inline mr-1" />Kilitli</span>}
-                </div>
-              ))}
-            </div>
-          ) : qual.hasDiploma ? (
-            <div className="px-5 py-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-[#C9952B]/10 flex items-center justify-center">
-                  <Award className="w-4 h-4 text-[#C9952B]" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-[#0B1D3A]">Diploma başvurusu</p>
-                  <p className="text-xs text-[#5A6478]">
-                    {qual.diploma?.department === "insaat_muhendisligi" ? "İnşaat Mühendisliği" : "Mimarlık"}
-                    {qual.diploma?.gradDate && ` · Mezuniyet: ${qual.diploma.gradDate}`}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="px-5 py-8 text-center">
-              <p className="text-sm text-[#5A6478]">İş deneyimi girilmemiş.</p>
-            </div>
-          )}
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
 
 /* ── FİRMA ── */
-function TabFirma({ company }: { company: Company }) {
+function TabFirma({ company, onRefresh, status, setActiveTab }: { company: Company; onRefresh?: () => void; status?: AppStatus; setActiveTab?: (t: DashboardTab) => void }) {
   const tuzel = company.companyType === "limited_as" || company.companyType === "as";
-  const typeLabel: Record<string, string> = {
-    sahis: "Şahıs şirketi",
-    limited_as: "Limited / A.Ş.",
-    kooperatif: "Kooperatif",
+  const isSahis = company.companyType === "sahis";
+  const typeLabel: Record<string, string> = { sahis: "Şahıs şirketi", limited_as: "Limited / A.Ş.", kooperatif: "Kooperatif" };
+
+  /* ── Firma bilgileri düzenleme ── */
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ companyName: company.companyName, phone: company.phone, email: company.email, kepAddress: company.kepAddress || "", city: company.city || "" });
+  const [saving, setSaving] = useState(false);
+
+  // company prop değişince formu güncelle (yenileme sonrası)
+  useEffect(() => {
+    setForm({ companyName: company.companyName, phone: company.phone, email: company.email, kepAddress: company.kepAddress || "", city: company.city || "" });
+  }, [company]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const { supabase: sb } = await import("./supabase-client");
+      await sb.from("companies").update({
+        company_name: form.companyName,
+        phone: form.phone,
+        email: form.email,
+        kep_address: form.kepAddress || null,
+        city: form.city || null,
+        guncelleme: new Date().toISOString()
+      }).eq("id", company.id);
+      setEditing(false); onRefresh?.();
+    } catch (e) { console.error(e); }
+    setSaving(false);
   };
+
+  /* ── İş deneyimi CRUD ── */
+  const qual = company.qualifications;
+  const locked = ["payment_received", "report_locked"].includes(status || "");
+  const [expModal, setExpModal] = useState<any | null>(null);
+  const [expForm, setExpForm] = useState({ isDeneyimiTipi: "kat_karsiligi" as string, adaParsel: "", sozlesmeTarihi: "", iskanTarihi: "", insaatAlaniM2: "", yapiYuksekligiM: "", yapiSinifi: "III.B", yapiTipi: "konut", taahhutBedeli: "", muteahhitArsaAyni: false });
+  const [expSaving, setExpSaving] = useState(false);
+
+  const openNewExp = (tipi: string) => { setExpForm({ isDeneyimiTipi: tipi, adaParsel: "", sozlesmeTarihi: "", iskanTarihi: "", insaatAlaniM2: "", yapiYuksekligiM: "", yapiSinifi: "III.B", yapiTipi: "konut", taahhutBedeli: "", muteahhitArsaAyni: false }); setExpModal({}); };
+  const openEditExp = (exp: any) => { setExpForm({ isDeneyimiTipi: exp.isDeneyimiTipi || "kat_karsiligi", adaParsel: exp.adaParsel || "", sozlesmeTarihi: exp.sozlesmeTarihi || "", iskanTarihi: exp.iskanTarihi || "", insaatAlaniM2: exp.insaatAlaniM2 || "", yapiYuksekligiM: exp.yapiYuksekligiM || "", yapiSinifi: exp.yapiSinifi || "III.B", yapiTipi: exp.yapiTipi || "konut", taahhutBedeli: exp.taahhutBedeli || "", muteahhitArsaAyni: exp.muteahhitArsaAyni || false }); setExpModal(exp); };
+  const handleExpSave = async () => {
+    setExpSaving(true);
+    try {
+      const { supabase: sb } = await import("./supabase-client");
+      const payload = { company_id: company.id, is_deneyimi_tipi: expForm.isDeneyimiTipi, ada_parsel: expForm.adaParsel || null, sozlesme_tarihi: expForm.sozlesmeTarihi || null, iskan_tarihi: expForm.iskanTarihi || null, insaat_alani_m2: expForm.insaatAlaniM2 ? parseFloat(expForm.insaatAlaniM2) : null, yapi_yuksekligi_m: expForm.yapiYuksekligiM ? parseFloat(expForm.yapiYuksekligiM) : null, yapi_sinifi: expForm.yapiSinifi || null, yapi_tipi: expForm.yapiTipi || null, taahhut_bedeli: expForm.taahhutBedeli ? parseFloat(expForm.taahhutBedeli.replace(/\./g, "")) : null, muteahhit_arsa_ayni: expForm.muteahhitArsaAyni, guncelleme: new Date().toISOString() };
+      if (expModal?.id) await sb.from("experiences").update(payload).eq("id", expModal.id);
+      else await sb.from("experiences").insert(payload);
+      setExpModal(null); onRefresh?.();
+    } catch (e) { console.error(e); }
+    setExpSaving(false);
+  };
+  const handleExpDelete = async (id: string) => {
+    if (!confirm("Bu iş deneyimini silmek istediğinize emin misiniz?")) return;
+    try { const { supabase: sb } = await import("./supabase-client"); await sb.from("experiences").delete().eq("id", id); onRefresh?.(); } catch (e) { console.error(e); }
+  };
+
+  /* ── Diploma CRUD ── */
+  const [dipModal, setDipModal] = useState(false);
+  const diploma = qual?.diploma;
+  const [dipForm, setDipForm] = useState({ partnerName: diploma?.partnerName || (isSahis ? company.companyName : ""), department: diploma?.department || "", gradDate: diploma?.gradDate || "" });
+  const [dipSaving, setDipSaving] = useState(false);
+  const handleDipSave = async () => {
+    setDipSaving(true);
+    try {
+      const { supabase: sb } = await import("./supabase-client");
+      await sb.from("diplomas").delete().eq("company_id", company.id);
+      await sb.from("diplomas").insert({ company_id: company.id, partner_name: isSahis ? company.companyName : dipForm.partnerName, department: dipForm.department, grad_date: dipForm.gradDate });
+      setDipModal(false); onRefresh?.();
+    } catch (e) { console.error(e); }
+    setDipSaving(false);
+  };
+  const handleDipDelete = async () => {
+    if (!confirm("Diploma bilgisini silmek istediğinize emin misiniz?")) return;
+    try { const { supabase: sb } = await import("./supabase-client"); await sb.from("diplomas").delete().eq("company_id", company.id); onRefresh?.(); } catch (e) { console.error(e); }
+  };
+
+  /* ── Ortak düzenleme ── */
+  const [editingPartners, setEditingPartners] = useState(false);
+  const [partnerDraft, setPartnerDraft] = useState<{ id: string; name: string; sharePercent: string; tcNo: string }[]>([]);
+  const [partnerSaving, setPartnerSaving] = useState(false);
+  const handlePartnerSave = async () => {
+    setPartnerSaving(true);
+    try {
+      const { supabase: sb } = await import("./supabase-client");
+      const payload = partnerDraft.filter(p => p.name.trim()).map(p => ({ name: p.name, sharePercent: p.sharePercent, tcNo: p.tcNo }));
+      await sb.from("companies").update({ partners: payload, guncelleme: new Date().toISOString() }).eq("id", company.id);
+      setEditingPartners(false); onRefresh?.();
+    } catch (e) { console.error(e); }
+    setPartnerSaving(false);
+  };
+
+  /* ── Hesaplama Yaptır ── */
+  const [hesapLoading, setHesapLoading] = useState(false);
+  const canRequestCalc = !locked && ["wizard_incomplete", "pending_payment", "report_published", "docs_complete", "application_submitted", "certificate_received"].includes(status || "");
+  const expCount = (qual?.experiences || []).length;
+  const hasChanges = expCount > 0 || !!diploma;
+
+  const handleHesaplamaYaptir = async () => {
+    setHesapLoading(true);
+    try {
+      const { supabase: sb, adminAddBilling, adminUpdateStatus } = await import("./supabase-client");
+      const fiyatlar: Record<string, number> = { bilgi_alma: 7000, sadece_hesaplama: 11000, hesaplama_basvuru: 20000, h_grubu: 12000 };
+      const mevcutPaket = company.selectedService || "h_grubu";
+      const yeniPaket = expCount > 0 ? (company.hizmetModeli === "biz_yapiyoruz" ? "hesaplama_basvuru" : "sadece_hesaplama") : "h_grubu";
+      const labels: Record<string, string> = { bilgi_alma: "Bilgi Alma Danışmanlığı", sadece_hesaplama: "İş Deneyim Hesaplama", hesaplama_basvuru: "Tam Hizmet — Hesaplama & Başvuru", h_grubu: "H Grubu Başvuru" };
+      const fark = Math.max(0, (fiyatlar[yeniPaket] || 0) - (fiyatlar[mevcutPaket] || 0));
+      if (fark > 0) {
+        const dueDate = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+        await adminAddBilling(company.id, `Paket yükseltme: ${labels[yeniPaket]}`, fark, dueDate);
+      }
+      await sb.from("companies").update({ selected_service: yeniPaket, service_label: labels[yeniPaket], guncelleme: new Date().toISOString() }).eq("id", company.id);
+      await adminUpdateStatus(company.id, "pending_payment", "Hesaplama talebi oluşturuldu", fark > 0 ? `Fark faturası: ${fark.toLocaleString("tr-TR")} ₺` : "Ek ücret yok");
+      onRefresh?.();
+    } catch (e) { console.error(e); }
+    setHesapLoading(false);
+  };
+
+  /* ── İş deneyimi verileri ── */
+  const allExps = qual?.experiences || [];
+  const katExps = allExps.filter((e: any) => (e.isDeneyimiTipi || e.is_deneyimi_tipi) !== "taahhut");
+  const taahhutExps = allExps.filter((e: any) => (e.isDeneyimiTipi || e.is_deneyimi_tipi) === "taahhut");
+
+  const ExpCard = ({ exp, idx, typeLabel: tl }: { exp: any; idx: number; typeLabel: string }) => (
+    <div className="flex items-center gap-3 p-3.5 rounded-xl border border-[#E8E4DC] bg-white hover:border-[#C9952B]/30 transition-colors group">
+      <div className={`w-9 h-9 rounded-xl ${(exp.isDeneyimiTipi || exp.is_deneyimi_tipi) === "taahhut" ? "bg-[#C9952B]" : "bg-[#0B1D3A]"} text-white text-xs font-bold flex items-center justify-center shrink-0`}>{idx + 1}</div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-medium text-[#0B1D3A] truncate">{exp.adaParsel || exp.ada_parsel || `${tl} ${idx + 1}`}</span>
+          {(exp.buildingClass || exp.yapiSinifi) && <span className="text-[10px] bg-[#C9952B]/10 text-[#C9952B] px-1.5 py-0.5 rounded font-bold">{exp.buildingClass || exp.yapiSinifi}</span>}
+        </div>
+        <div className="flex flex-wrap gap-x-3 text-[11px] text-[#5A6478] mt-0.5">
+          {(exp.contractDate || exp.sozlesmeTarihi) && <span>Sözleşme: {exp.contractDate || exp.sozlesmeTarihi}</span>}
+          {(exp.totalArea || exp.insaatAlaniM2) && <span>{exp.totalArea || exp.insaatAlaniM2} m²</span>}
+          {exp.taahhutBedeli && <span>{Number(exp.taahhutBedeli).toLocaleString("tr-TR")} ₺</span>}
+        </div>
+      </div>
+      {!locked && (
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          <button onClick={() => openEditExp(exp)} className="p-1.5 text-[#5A6478] hover:text-[#C9952B] rounded-lg hover:bg-[#C9952B]/10"><Edit2 className="w-3.5 h-3.5" /></button>
+          <button onClick={() => handleExpDelete(exp.id)} className="p-1.5 text-[#5A6478] hover:text-red-500 rounded-lg hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
+        </div>
+      )}
+      {locked && <Lock className="w-3.5 h-3.5 text-[#5A6478]/40 shrink-0" />}
+    </div>
+  );
 
   return (
     <div className="space-y-5">
+      {/* ═══ 1. Firma bilgileri ═══ */}
       <div className="bg-white rounded-2xl border border-[#E8E4DC] p-6">
-        <h3 className="text-sm font-semibold text-[#0B1D3A] mb-5">Firma bilgileri</h3>
-        <div className="grid sm:grid-cols-2 gap-5">
-          <InfoCard label="Unvan"            value={company.companyName} />
-          <InfoCard label="Firma tipi"       value={typeLabel[company.companyType] || company.companyType} />
-          <InfoCard label="Vergi kimlik no"  value={company.taxId} />
-          <InfoCard label="Telefon"          value={company.phone} />
-          <InfoCard label="E-posta"          value={company.email} />
-          <InfoCard label="Şehir"            value={company.location === "istanbul" ? "İstanbul" : company.city} />
-          <InfoCard label="İlk başvuru mu?"  value={company.isFirstTime === "first" ? "Evet, ilk başvuru" : "Yenileme / Yükseltme"} />
-          <InfoCard label="Seçilen hizmet"   value={company.serviceLabel || "—"} />
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-sm font-semibold text-[#0B1D3A]">Firma bilgileri</h3>
+          {!editing ? (
+            <button onClick={() => setEditing(true)} className="text-xs text-[#C9952B] hover:underline flex items-center gap-1"><Edit2 className="w-3.5 h-3.5" /> Düzenle</button>
+          ) : (
+            <div className="flex gap-2">
+              <button onClick={() => setEditing(false)} className="text-xs text-[#5A6478] hover:underline">İptal</button>
+              <button onClick={handleSave} disabled={saving} className="text-xs bg-[#C9952B] text-white px-3 py-1 rounded-lg hover:bg-[#B8862A] flex items-center gap-1"><Save className="w-3 h-3" /> {saving ? "..." : "Kaydet"}</button>
+            </div>
+          )}
         </div>
+        {editing ? (
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2"><label className="text-xs text-[#5A6478] block mb-1">Unvan</label><input value={form.companyName} onChange={e => setForm(f => ({ ...f, companyName: e.target.value }))} className="w-full px-3 py-2 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]" /></div>
+            <div className="flex flex-col justify-center">
+              <p className="text-xs text-[#5A6478] mb-0.5">Firma tipi</p>
+              <p className="text-sm text-[#0B1D3A] font-medium bg-[#F8F7F4] px-3 py-2 rounded-lg">{typeLabel[company.companyType] || company.companyType || "—"}</p>
+            </div>
+            <div className="flex flex-col justify-center">
+              <p className="text-xs text-[#5A6478] mb-0.5">Vergi kimlik no</p>
+              <p className="text-sm text-[#0B1D3A] font-medium bg-[#F8F7F4] px-3 py-2 rounded-lg">{company.taxId || "—"}</p>
+            </div>
+            <div><label className="text-xs text-[#5A6478] block mb-1">Telefon</label><input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="w-full px-3 py-2 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]" /></div>
+            <div><label className="text-xs text-[#5A6478] block mb-1">E-posta</label><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="w-full px-3 py-2 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]" /></div>
+            {company.location === "istanbul_disi" && (
+              <div><label className="text-xs text-[#5A6478] block mb-1">Şehir</label><input value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} placeholder="Ankara" className="w-full px-3 py-2 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]" /></div>
+            )}
+            <div><label className="text-xs text-[#5A6478] block mb-1">KEP adresi</label><input value={form.kepAddress} onChange={e => setForm(f => ({ ...f, kepAddress: e.target.value }))} placeholder="firma@hs01.kep.tr" className="w-full px-3 py-2 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]" /></div>
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 gap-5">
+            <InfoCard label="Unvan" value={company.companyName} />
+            <InfoCard label="Firma tipi" value={typeLabel[company.companyType] || company.companyType} />
+            <InfoCard label="Vergi kimlik no" value={company.taxId} />
+            <InfoCard label="Telefon" value={company.phone} />
+            <InfoCard label="E-posta" value={company.email} />
+            <InfoCard label="Şehir" value={company.location === "istanbul" ? "İstanbul" : (company.city || "—")} />
+            <InfoCard label="KEP adresi" value={company.kepAddress || "—"} />
+            <InfoCard label="Seçilen hizmet" value={company.serviceLabel || "—"} />
+          </div>
+        )}
       </div>
 
-      {/* Şahıs — ticaret odası uyarısı */}
-      {!tuzel && (
-        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 flex items-start gap-3">
-          <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+      {/* Ortaklar */}
+      {tuzel && (
+        <div className="bg-white rounded-2xl border border-[#E8E4DC] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[#E8E4DC] flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-[#0B1D3A] flex items-center gap-2"><Users className="w-4 h-4 text-[#C9952B]" /> Ortak bilgileri</h3>
+            {!editingPartners ? (
+              <button onClick={() => { setPartnerDraft((company.partners || []).map((p, i) => ({ id: String(i), name: p.name || "", sharePercent: p.sharePercent || "", tcNo: p.tcNo || "" }))); setEditingPartners(true); }} className="text-xs text-[#C9952B] hover:underline flex items-center gap-1"><Edit2 className="w-3.5 h-3.5" /> Düzenle</button>
+            ) : (
+              <div className="flex gap-2">
+                <button onClick={() => setEditingPartners(false)} className="text-xs text-[#5A6478] hover:underline">İptal</button>
+                <button onClick={handlePartnerSave} disabled={partnerSaving} className="text-xs bg-[#C9952B] text-white px-3 py-1 rounded-lg hover:bg-[#B8862A] flex items-center gap-1"><Save className="w-3 h-3" /> {partnerSaving ? "..." : "Kaydet"}</button>
+              </div>
+            )}
+          </div>
+          {!editingPartners ? (
+            <div className="divide-y divide-[#F0EDE8]">
+              {(company.partners || []).length > 0 ? company.partners!.map((p, i) => (
+                <div key={i} className="px-5 py-3.5 flex items-center justify-between">
+                  <div><p className="text-sm font-medium text-[#0B1D3A]">{p.name || "—"}</p>{p.tcNo && <p className="text-xs text-[#5A6478]">TC: {p.tcNo}</p>}</div>
+                  <span className="text-sm font-bold text-[#C9952B]">%{p.sharePercent}</span>
+                </div>
+              )) : (
+                <p className="px-5 py-4 text-xs text-[#5A6478]">Ortak bilgisi girilmemiş.</p>
+              )}
+            </div>
+          ) : (
+            <div className="p-4 space-y-3">
+              {partnerDraft.map((p, i) => (
+                <div key={p.id} className="grid grid-cols-[1fr_1fr_80px_32px] gap-2 bg-[#F8F7F4] p-3 rounded-xl">
+                  <div><label className="text-[10px] text-[#5A6478] block mb-1">Ad Soyad</label><input value={p.name} onChange={e => setPartnerDraft(d => d.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} className="w-full px-2 py-1.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]" /></div>
+                  <div><label className="text-[10px] text-[#5A6478] block mb-1">TC Kimlik</label><input value={p.tcNo} onChange={e => setPartnerDraft(d => d.map((x, j) => j === i ? { ...x, tcNo: e.target.value.replace(/\D/g,"").slice(0,11) } : x))} placeholder="11 hane" className="w-full px-2 py-1.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]" /></div>
+                  <div><label className="text-[10px] text-[#5A6478] block mb-1">Hisse %</label><input value={p.sharePercent} onChange={e => setPartnerDraft(d => d.map((x, j) => j === i ? { ...x, sharePercent: e.target.value.replace(/\D/g,"").slice(0,3) } : x))} placeholder="50" className="w-full px-2 py-1.5 border border-[#E8E4DC] rounded-lg text-sm focus:outline-none focus:border-[#C9952B]" /></div>
+                  <button onClick={() => { if (partnerDraft.length > 1) setPartnerDraft(d => d.filter((_, j) => j !== i)); }} className="self-end mb-1 p-1.5 text-red-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              ))}
+              <button onClick={() => setPartnerDraft(d => [...d, { id: String(Date.now()), name: "", sharePercent: "", tcNo: "" }])} className="text-xs text-[#C9952B] flex items-center gap-1 hover:underline"><Plus className="w-3.5 h-3.5" /> Ortak ekle</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Kilitleme uyarısı */}
+      {locked && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
+          <Lock className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-medium text-blue-700">Ticaret odası kaydı zorunludur</p>
-            <p className="text-xs text-blue-600 mt-1">
-              Şahıs şirketleri için ticaret odası kaydı zorunludur. Faaliyet kodu{" "}
-              <strong>41.00.01 İkamet amaçlı binaların inşaatı</strong> olmalıdır.
-              Bu belgeyi evrak aşamasında sistem otomatik kontrol eder.
-            </p>
+            <p className="text-sm font-medium text-blue-700">Raporunuz hazırlanıyor</p>
+            <p className="text-xs text-blue-600 mt-0.5">İş deneyimi değişikliği rapor yayınlandıktan sonra yapılabilir.</p>
           </div>
         </div>
       )}
 
-      {/* Ortaklar (tüzel) */}
-      {tuzel && company.partners && company.partners.length > 0 && (
+      {/* ═══ 2. İş deneyimleri ═══ */}
+      <div className="space-y-4">
+        {/* Kat Karşılığı */}
         <div className="bg-white rounded-2xl border border-[#E8E4DC] overflow-hidden">
-          <div className="px-5 py-4 border-b border-[#E8E4DC] flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-[#0B1D3A] flex items-center gap-2">
-              <Users className="w-4 h-4 text-[#C9952B]" /> Ortak bilgileri
-            </h3>
-            <button className="text-xs text-[#C9952B] hover:underline">Düzenle</button>
+          <div className="px-5 py-3.5 bg-[#F8F7F4] border-b border-[#E8E4DC] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-[#0B1D3A] flex items-center justify-center"><Building2 className="w-3.5 h-3.5 text-white" /></div>
+              <h3 className="text-sm font-semibold text-[#0B1D3A]">Kat Karşılığı İşleri</h3>
+              {katExps.length > 0 && <span className="text-[10px] bg-[#C9952B]/10 text-[#C9952B] px-1.5 py-0.5 rounded-full font-bold">{katExps.length}</span>}
+            </div>
+            {!locked && <button onClick={() => openNewExp("kat_karsiligi")} className="text-xs text-[#C9952B] font-medium flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#C9952B]/20 hover:bg-[#C9952B]/5"><Plus className="w-3.5 h-3.5" /> Ekle</button>}
           </div>
-          <div className="divide-y divide-[#F0EDE8]">
-            {company.partners.map((p, i) => (
-              <div key={i} className="px-5 py-3.5 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-[#0B1D3A]">{p.name || "—"}</p>
-                  {p.tcNo && <p className="text-xs text-[#5A6478]">TC: {p.tcNo}</p>}
+          <div className="p-4 space-y-2">
+            {katExps.length > 0 ? katExps.map((exp: any, i: number) => <ExpCard key={exp.id || i} exp={exp} idx={i} typeLabel="Kat karşılığı" />) : (
+              <p className="text-xs text-[#5A6478] text-center py-4">Henüz kat karşılığı iş eklenmemiş.</p>
+            )}
+          </div>
+        </div>
+
+        {/* Taahhüt */}
+        <div className="bg-white rounded-2xl border border-[#E8E4DC] overflow-hidden">
+          <div className="px-5 py-3.5 bg-[#F8F7F4] border-b border-[#E8E4DC] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-[#C9952B] flex items-center justify-center"><FileText className="w-3.5 h-3.5 text-white" /></div>
+              <h3 className="text-sm font-semibold text-[#0B1D3A]">Taahhüt İşleri</h3>
+              {taahhutExps.length > 0 && <span className="text-[10px] bg-[#C9952B]/10 text-[#C9952B] px-1.5 py-0.5 rounded-full font-bold">{taahhutExps.length}</span>}
+            </div>
+            {!locked && <button onClick={() => openNewExp("taahhut")} className="text-xs text-[#C9952B] font-medium flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#C9952B]/20 hover:bg-[#C9952B]/5"><Plus className="w-3.5 h-3.5" /> Ekle</button>}
+          </div>
+          <div className="p-4 space-y-2">
+            {taahhutExps.length > 0 ? taahhutExps.map((exp: any, i: number) => <ExpCard key={exp.id || i} exp={exp} idx={i} typeLabel="Taahhüt" />) : (
+              <p className="text-xs text-[#5A6478] text-center py-4">Henüz taahhüt işi eklenmemiş.</p>
+            )}
+          </div>
+        </div>
+
+        {/* Diploma */}
+        <div className="bg-white rounded-2xl border border-[#E8E4DC] overflow-hidden">
+          <div className="px-5 py-3.5 bg-[#F8F7F4] border-b border-[#E8E4DC] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-lg bg-blue-600 flex items-center justify-center"><Award className="w-3.5 h-3.5 text-white" /></div>
+              <h3 className="text-sm font-semibold text-[#0B1D3A]">Diploma</h3>
+              {diploma && <span className="text-[10px] bg-green-50 text-green-700 px-1.5 py-0.5 rounded-full font-medium">Mevcut</span>}
+            </div>
+            {!locked && !diploma && <button onClick={() => { setDipForm({ partnerName: isSahis ? company.companyName : "", department: "", gradDate: "" }); setDipModal(true); }} className="text-xs text-[#C9952B] font-medium flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#C9952B]/20 hover:bg-[#C9952B]/5"><Plus className="w-3.5 h-3.5" /> Ekle</button>}
+          </div>
+          <div className="p-4">
+            {diploma ? (
+              <div className="flex items-center gap-3 p-3.5 rounded-xl border border-blue-100 bg-blue-50/50 group">
+                <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center shrink-0"><Award className="w-4 h-4 text-blue-600" /></div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-[#0B1D3A]">{diploma.partnerName || "—"}</p>
+                  <p className="text-xs text-[#5A6478] mt-0.5">
+                    {diploma.department === "insaat_muhendisligi" ? "İnşaat Mühendisliği" : "Mimarlık"}
+                    {diploma.gradDate && ` · Mezuniyet: ${diploma.gradDate}`}
+                  </p>
                 </div>
-                <span className="text-sm font-bold text-[#C9952B]">%{p.sharePercent}</span>
+                {!locked && (
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    <button onClick={() => { setDipForm({ partnerName: diploma.partnerName || "", department: diploma.department || "", gradDate: diploma.gradDate || "" }); setDipModal(true); }} className="p-1.5 text-[#5A6478] hover:text-[#C9952B] rounded-lg hover:bg-[#C9952B]/10"><Edit2 className="w-3.5 h-3.5" /></button>
+                    <button onClick={handleDipDelete} className="p-1.5 text-[#5A6478] hover:text-red-500 rounded-lg hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </div>
+                )}
               </div>
-            ))}
+            ) : (
+              <p className="text-xs text-[#5A6478] text-center py-4">Diploma bilgisi girilmemiş.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ═══ 3. Hesaplama Yaptır butonu ═══ */}
+      {canRequestCalc && hasChanges && (
+        <button onClick={handleHesaplamaYaptir} disabled={hesapLoading}
+          className="w-full bg-gradient-to-r from-[#0B1D3A] to-[#122A54] text-white py-3.5 rounded-2xl text-sm font-medium hover:from-[#122A54] hover:to-[#1A3A6E] transition-all flex items-center justify-center gap-2 shadow-lg">
+          {hesapLoading ? <><div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /> İşleniyor...</> : <><BarChart3 className="w-4 h-4" /> Hesaplama Yaptır</>}
+        </button>
+      )}
+
+      {/* ═══ İş deneyimi modal ═══ */}
+      {expModal !== null && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setExpModal(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="bg-gradient-to-r from-[#0B1D3A] to-[#122A54] p-5 rounded-t-2xl flex items-center justify-between">
+              <div>
+                <h3 className="text-white font-bold">{expModal?.id ? "İş Deneyimi Düzenle" : "Yeni İş Deneyimi Ekle"}</h3>
+                <p className="text-white/40 text-xs mt-0.5">{expForm.isDeneyimiTipi === "taahhut" ? "Taahhüt işi" : "Kat karşılığı işi"}</p>
+              </div>
+              <button onClick={() => setExpModal(null)} className="text-white/60 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs text-[#5A6478] block mb-1.5 font-medium">İş türü</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[{ v: "kat_karsiligi", l: "Kat karşılığı", desc: "Arsa sahibiyle anlaşma" }, { v: "taahhut", l: "Taahhüt", desc: "İhale veya özel sözleşme" }].map(t => (
+                    <button key={t.v} onClick={() => setExpForm(f => ({ ...f, isDeneyimiTipi: t.v }))}
+                      className={`p-3 rounded-xl text-left border-2 transition-all ${expForm.isDeneyimiTipi === t.v ? "border-[#C9952B] bg-[#C9952B]/5" : "border-[#E8E4DC]"}`}>
+                      <p className={`text-sm font-medium ${expForm.isDeneyimiTipi === t.v ? "text-[#0B1D3A]" : "text-[#5A6478]"}`}>{t.l}</p>
+                      <p className="text-[10px] text-[#5A6478] mt-0.5">{t.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div><label className="text-xs text-[#5A6478] block mb-1.5 font-medium">Ada / Parsel *</label><input value={expForm.adaParsel} onChange={e => setExpForm(f => ({ ...f, adaParsel: e.target.value }))} placeholder="123/4" className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs text-[#5A6478] block mb-1.5 font-medium">Sözleşme tarihi *</label><input type="date" value={expForm.sozlesmeTarihi} onChange={e => setExpForm(f => ({ ...f, sozlesmeTarihi: e.target.value }))} className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none" /></div>
+                <div><label className="text-xs text-[#5A6478] block mb-1.5 font-medium">İskan tarihi</label><input type="date" value={expForm.iskanTarihi} onChange={e => setExpForm(f => ({ ...f, iskanTarihi: e.target.value }))} className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none" /></div>
+              </div>
+              {expForm.isDeneyimiTipi === "kat_karsiligi" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-xs text-[#5A6478] block mb-1.5 font-medium">İnşaat alanı (m²) *</label><input value={expForm.insaatAlaniM2} onChange={e => setExpForm(f => ({ ...f, insaatAlaniM2: e.target.value }))} className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none" /></div>
+                    <div><label className="text-xs text-[#5A6478] block mb-1.5 font-medium">Yapı yüksekliği (m)</label><input value={expForm.yapiYuksekligiM} onChange={e => setExpForm(f => ({ ...f, yapiYuksekligiM: e.target.value }))} className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none" /></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-xs text-[#5A6478] block mb-1.5 font-medium">Yapı sınıfı *</label><select value={expForm.yapiSinifi} onChange={e => setExpForm(f => ({ ...f, yapiSinifi: e.target.value }))} className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none bg-white">{["III.B","III.C","IV.A","IV.B","IV.C","V.A","V.B","V.C","V.D","V.E"].map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+                    <div><label className="text-xs text-[#5A6478] block mb-1.5 font-medium">Yapı tipi</label><select value={expForm.yapiTipi} onChange={e => setExpForm(f => ({ ...f, yapiTipi: e.target.value }))} className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none bg-white">{[["konut","Konut"],["konut_ticari","Konut+Ticari"],["ticari","Ticari"],["sanayi","Sanayi"],["otel","Otel"],["hastane","Hastane"],["avm","AVM"],["diger","Diğer"]].map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+                  </div>
+                  {/* Arsa sahibi / müteahhit aynı */}
+                  <div onClick={() => setExpForm(f => ({ ...f, muteahhitArsaAyni: !f.muteahhitArsaAyni }))} className="flex items-center gap-3 p-3 bg-[#F8F7F4] rounded-xl cursor-pointer mt-1">
+                    <div className={`w-8 h-[18px] rounded-full relative transition-colors ${expForm.muteahhitArsaAyni ? "bg-[#C9952B]" : "bg-[#E8E4DC]"}`}>
+                      <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-[2px] transition-all shadow-sm ${expForm.muteahhitArsaAyni ? "left-4" : "left-[2px]"}`} />
+                    </div>
+                    <span className="text-xs text-[#5A6478]">Müteahhit ve arsa sahibi aynı kişi / firma</span>
+                  </div>
+                </>
+              )}
+              {expForm.isDeneyimiTipi === "taahhut" && (
+                <div><label className="text-xs text-[#5A6478] block mb-1.5 font-medium">Taahhüt bedeli (₺) *</label><input value={expForm.taahhutBedeli} onChange={e => setExpForm(f => ({ ...f, taahhutBedeli: e.target.value }))} placeholder="5.000.000" className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none" /></div>
+              )}
+              {/* İskan belgesi uyarısı */}
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 flex items-start gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-amber-700">İskan belgesi zorunludur. Belgeyi evraklar sekmesinden yükleyebilirsiniz.</p>
+              </div>
+              <button onClick={handleExpSave} disabled={expSaving} className="w-full bg-[#0B1D3A] text-white py-3 rounded-xl text-sm font-medium hover:bg-[#122A54] transition-colors flex items-center justify-center gap-2">
+                {expSaving ? "Kaydediliyor..." : expModal?.id ? "Güncelle" : "Ekle"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Diploma modal ═══ */}
+      {dipModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setDipModal(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="bg-gradient-to-r from-[#0B1D3A] to-[#122A54] p-5 rounded-t-2xl flex items-center justify-between">
+              <h3 className="text-white font-bold">{diploma ? "Diploma Düzenle" : "Diploma Ekle"}</h3>
+              <button onClick={() => setDipModal(false)} className="text-white/60 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              {!isSahis && (
+                <div>
+                  <label className="text-xs text-[#5A6478] block mb-1.5 font-medium">Diploma sahibi ortağın adı *</label>
+                  {tuzel && company.partners && company.partners.length > 0 ? (
+                    <select value={dipForm.partnerName} onChange={e => setDipForm(f => ({ ...f, partnerName: e.target.value }))} className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none bg-white">
+                      <option value="">Seçiniz</option>
+                      {company.partners.filter(p => p.name.trim()).map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                    </select>
+                  ) : (
+                    <input value={dipForm.partnerName} onChange={e => setDipForm(f => ({ ...f, partnerName: e.target.value }))} className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none" />
+                  )}
+                </div>
+              )}
+              {isSahis && (
+                <div>
+                  <label className="text-xs text-[#5A6478] block mb-1.5 font-medium">Diploma sahibi</label>
+                  <div className="px-3 py-2.5 bg-[#F8F7F4] rounded-xl text-sm text-[#0B1D3A]">{company.companyName}</div>
+                </div>
+              )}
+              <div>
+                <label className="text-xs text-[#5A6478] block mb-1.5 font-medium">Bölüm *</label>
+                <select value={dipForm.department} onChange={e => setDipForm(f => ({ ...f, department: e.target.value }))} className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none bg-white">
+                  <option value="">Seçiniz</option><option value="insaat_muhendisligi">İnşaat Mühendisliği</option><option value="mimarlik">Mimarlık</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-[#5A6478] block mb-1.5 font-medium">Mezuniyet tarihi *</label>
+                <input type="date" value={dipForm.gradDate} onChange={e => setDipForm(f => ({ ...f, gradDate: e.target.value }))} className="w-full px-3 py-2.5 border border-[#E8E4DC] rounded-xl text-sm focus:border-[#C9952B] focus:outline-none" />
+              </div>
+              <button onClick={handleDipSave} disabled={dipSaving} className="w-full bg-[#0B1D3A] text-white py-3 rounded-xl text-sm font-medium hover:bg-[#122A54] transition-colors">
+                {dipSaving ? "Kaydediliyor..." : diploma ? "Güncelle" : "Ekle"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -650,25 +997,41 @@ function TabOdeme({ company, invoices }: { company: Company; invoices: Invoice[]
 
       {/* Ödeme bilgileri */}
       {totalPending > 0 && (
-        <div className="bg-[#0B1D3A] rounded-2xl p-5 text-white">
-          <h3 className="text-sm font-semibold mb-3">Ödeme Bilgileri</h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-white/60">Banka</span>
-              <span>Ziraat Bankası</span>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* IBAN ile ödeme */}
+          <div className="bg-[#0B1D3A] rounded-2xl p-5 text-white">
+            <h3 className="text-sm font-semibold mb-3">Havale / EFT</h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-white/60">Banka</span>
+                <span>Ziraat Bankası</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/60">Alıcı</span>
+                <span>Müteahhitlik Belgesi Danışmanlık</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/60">IBAN</span>
+                <span className="font-mono text-xs">TR00 0000 0000 0000 0000 0000 00</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-white/60">Açıklama</span>
+                <span className="text-[#C9952B] font-medium">{company.companyName}</span>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-white/60">Alıcı</span>
-              <span>Müteahhitlik Belgesi Danışmanlık</span>
+          </div>
+
+          {/* Kartla ödeme */}
+          <div className="bg-white rounded-2xl border border-[#E8E4DC] p-5">
+            <h3 className="text-sm font-semibold text-[#0B1D3A] mb-3">Kartla Öde</h3>
+            <p className="text-xs text-[#5A6478] mb-4">Kredi veya banka kartı ile ödeme yapmak için bizimle iletişime geçin.</p>
+            <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 mb-4">
+              <p className="text-xs text-amber-700 font-medium">Bekleyen tutar: <span className="text-amber-900 font-bold">{tlFmt(totalPending)}</span></p>
             </div>
-            <div className="flex justify-between">
-              <span className="text-white/60">IBAN</span>
-              <span className="font-mono text-xs">TR00 0000 0000 0000 0000 0000 00</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-white/60">Açıklama</span>
-              <span className="text-[#C9952B] font-medium">{company.companyName}</span>
-            </div>
+            <a href="https://wa.me/905000000000?text=Merhaba%2C%20kart%20ile%20%C3%B6deme%20yapmak%20istiyorum." target="_blank" rel="noreferrer"
+              className="w-full flex items-center justify-center gap-2 bg-[#C9952B] hover:bg-[#B8862A] text-[#0B1D3A] font-medium py-2.5 rounded-xl text-sm transition-colors">
+              <Phone className="w-4 h-4" /> WhatsApp ile İletişim
+            </a>
           </div>
         </div>
       )}
@@ -677,10 +1040,10 @@ function TabOdeme({ company, invoices }: { company: Company; invoices: Invoice[]
 }
 
 /* ── EVRAKLAR SEKMESİ ── */
-function TabEvraklar({ company, hizmetModeli, status, dbDocs }: { company: Company; hizmetModeli: "biz_yapiyoruz" | "musteri_yapiyor"; status: AppStatus; dbDocs: any[] }) {
+function TabEvraklar({ company, hizmetModeli, status, dbDocs, onViewPdf, sonRapor }: { company: Company; hizmetModeli: "biz_yapiyoruz" | "musteri_yapiyor"; status: AppStatus; dbDocs: any[]; onViewPdf?: (url: string, name: string) => void; sonRapor?: any }) {
   const raporYayinlandi = ["report_published","docs_in_progress","docs_complete","application_submitted","certificate_received"].includes(status);
 
-  const evrakListe = buildDocList(company, hizmetModeli);
+  const evrakListe = buildDocList(company, hizmetModeli, sonRapor);
 
   /* Supabase'den gelen evrakları yukluler map'e dönüştür */
   const [yukluler, setYukluler] = useState<Record<string, { dosyaAdi: string; dosyaUrl?: string; yuklemeTarihi: string; durum: string; adminNotu?: string }>>(() =>
@@ -746,7 +1109,7 @@ function TabEvraklar({ company, hizmetModeli, status, dbDocs }: { company: Compa
       {company.companyType === "sahis" && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
           <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          <p className="text-xs text-amber-800">Ticaret odası kaydınızın faaliyet kodu <strong>41.00.01</strong> olması gerekmektedir.</p>
+          <p className="text-xs text-amber-800">Şahıs şirketleri için ticaret odası kaydı zorunludur. Faaliyet kodu inşaat ile ilgili olmalıdır, örn. <strong>41.00.01 İkamet amaçlı binaların inşaatı</strong>.</p>
         </div>
       )}
 
@@ -810,11 +1173,30 @@ function TabEvraklar({ company, hizmetModeli, status, dbDocs }: { company: Compa
 
                         {/* Wizard'dan yüklendi */}
                         {iskanYuklendi && (
-                          <div className="bg-green-50 border border-green-100 rounded-lg p-3 mb-3">
+                          <div className="bg-green-50 border border-green-100 rounded-lg p-3 mb-3 flex items-center justify-between">
                             <p className="text-xs text-green-700 flex items-center gap-1.5">
                               <CheckCircle className="w-3.5 h-3.5" />
                               Başvuru sırasında yüklendi: <strong>{evrak.dosyaAdi}</strong>
                             </p>
+                            {evrak.dosyaUrl && onViewPdf && (
+                              <button onClick={() => onViewPdf(evrak.dosyaUrl, evrak.dosyaAdi || "Belge")} className="text-xs text-[#C9952B] hover:underline flex items-center gap-1 shrink-0 ml-2">
+                                <Eye className="w-3.5 h-3.5" /> Görüntüle
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Yüklendi — görüntüle butonu */}
+                        {yukleme?.dosyaUrl && (
+                          <div className="flex gap-2 mb-3">
+                            {onViewPdf && (
+                              <button onClick={() => onViewPdf(yukleme.dosyaUrl, yukleme.dosyaAdi || "Belge")} className="text-xs text-[#C9952B] hover:underline flex items-center gap-1">
+                                <Eye className="w-3.5 h-3.5" /> Görüntüle
+                              </button>
+                            )}
+                            <a href={yukleme.dosyaUrl} target="_blank" rel="noreferrer" className="text-xs text-[#5A6478] hover:underline flex items-center gap-1">
+                              <Download className="w-3.5 h-3.5" /> İndir
+                            </a>
                           </div>
                         )}
 
@@ -836,7 +1218,7 @@ function TabEvraklar({ company, hizmetModeli, status, dbDocs }: { company: Compa
                               <p className="text-xs text-[#9CA3AF]">PDF, JPG veya PNG</p>
                             </div>
                             <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden"
-                              onChange={ev => { const f = ev.target.files?.[0]; if (f) handleYukle(evrak.id, f); }} />
+                              onChange={ev => { const f = ev.target.files?.[0]; if (f) handleYukle(evrak.id, evrak.baslik, evrak.grubu || "Genel", f); }} />
                           </label>
                         )}
 
@@ -877,10 +1259,17 @@ function TabEvraklar({ company, hizmetModeli, status, dbDocs }: { company: Compa
                     <p className="text-xs text-[#5A6478] mt-0.5">{formatDate(b.olusturulma)}{b.belge_not ? ` · ${b.belge_not}` : ""}</p>
                   </div>
                   {b.dosya_url ? (
-                    <a href={b.dosya_url} target="_blank" rel="noreferrer"
-                      className="text-xs text-[#C9952B] hover:underline shrink-0 flex items-center gap-1">
-                      <Download className="w-3.5 h-3.5" /> İndir
-                    </a>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {onViewPdf && (
+                        <button onClick={() => onViewPdf(b.dosya_url, b.baslik || "Belge")} className="text-xs text-[#C9952B] hover:underline flex items-center gap-1">
+                          <Eye className="w-3.5 h-3.5" /> Görüntüle
+                        </button>
+                      )}
+                      <a href={b.dosya_url} target="_blank" rel="noreferrer"
+                        className="text-xs text-[#5A6478] hover:underline shrink-0 flex items-center gap-1">
+                        <Download className="w-3.5 h-3.5" /> İndir
+                      </a>
+                    </div>
                   ) : (
                     <span className="text-xs text-[#9CA3AF] shrink-0">Hazırlanıyor</span>
                   )}
@@ -1046,6 +1435,28 @@ function TabRapor({ status, company, sonRapor }: { status: AppStatus; company: C
   const isDetaylari = sonRapor.is_detaylari || sonRapor.isDetaylari || sonRapor.isler || [];
   const adminNotuRapor = sonRapor.admin_notu || sonRapor.adminNotu;
 
+  /* Kullanılan iş ID'lerini belirle */
+  const y1Ids = new Set((y1?.son5YilIsler || []).map((x: any) => x.id));
+  const y2EnBuyukId = y2?.enBuyukIs?.id;
+  const isUsed = (is: any) => tercih === "son5" ? y1Ids.has(is.id) : is.id === y2EnBuyukId;
+
+  /* Bir üst gruba kalan tutar — raporda varsa kullan, yoksa client-side hesapla */
+  const birUstFromRapor = sonRapor.birUstGrup || sonRapor.bir_ust_grup;
+  const eksikTutarFromRapor = sonRapor.eksikTutar || sonRapor.eksik_tutar;
+
+  const GRUP_SIRALAMA = ["H","G1","G","F1","F","E1","E","D1","D","C1","C","B1","B","A"];
+  const GRUP_MIN: Record<string, number> = {
+    A: 123825000, B: 86677500, B1: 74295000, C: 61912500, C1: 51593750,
+    D: 41275000, D1: 30956250, E: 20637500, E1: 12382500, F: 6191250,
+    F1: 5262563, G: 4333875, G1: 3095625, H: 0,
+  };
+  const hesGrupIdx = GRUP_SIRALAMA.indexOf(hesGrup);
+  const birUst = birUstFromRapor ?? (hesGrupIdx > 0 ? { grup: GRUP_SIRALAMA[hesGrupIdx - 1], min: GRUP_MIN[GRUP_SIRALAMA[hesGrupIdx - 1]] } : null);
+  const eksikTutar = eksikTutarFromRapor ?? (birUst && toplamTutar ? Math.max(0, (birUst as any).min - toplamTutar) : 0);
+
+  const bankaRef = sonRapor.bankaRefTutari || sonRapor.banka_ref_tutari;
+  const bantLabel: Record<string, string> = { ufe: "ÜFE endeksi", alt_sinir: "Alt sınır (YMO×0.90)", ust_sinir: "Üst sınır (YMO×1.30)" };
+
   return (
     <div className="space-y-5">
       {/* Özet kart */}
@@ -1053,19 +1464,29 @@ function TabRapor({ status, company, sonRapor }: { status: AppStatus; company: C
         <div className="flex items-start justify-between mb-4">
           <div>
             <p className="text-xs text-white/50 mb-1">Toplam Güncel İş Deneyimi</p>
-            <p className="text-2xl font-bold text-[#C9952B]">
-              {toplamTutar ? tlFmt(toplamTutar) : "—"}
-            </p>
+            <p className="text-2xl font-bold text-[#C9952B]">{toplamTutar ? tlFmt(toplamTutar) : "—"}</p>
           </div>
           <div className="text-right">
             <p className="text-xs text-white/50 mb-1">Tespit Edilen Grup</p>
-            <span className="inline-block px-4 py-2 rounded-full bg-[#C9952B]/20 text-[#C9952B] text-xl font-bold">
-              {hesGrup}
-            </span>
+            <span className="inline-block px-4 py-2 rounded-full bg-[#C9952B]/20 text-[#C9952B] text-xl font-bold">{hesGrup}</span>
           </div>
         </div>
-        <p className="text-xs text-white/30">Rapor tarihi: {raporTarihi || "—"}</p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-white/30">Rapor tarihi: {raporTarihi || "—"}</p>
+          <p className="text-xs text-white/40">Tercih: {tercih === "son5" ? "Son 5 Yıl Toplamı" : "En Büyük İş × 2"}</p>
+        </div>
       </div>
+
+      {/* Bir üst gruba kalan */}
+      {birUst && eksikTutar > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-amber-800">Bir üst gruba ({birUst.grup}) <span className="text-amber-900 font-bold">{tlFmt(eksikTutar)}</span> kaldı</p>
+            <p className="text-xs text-amber-600 mt-0.5">Eşik: {tlFmt(birUst.min)}</p>
+          </div>
+        </div>
+      )}
 
       {/* Y1 / Y2 karşılaştırma */}
       {(y1 || y2) && (
@@ -1075,53 +1496,98 @@ function TabRapor({ status, company, sonRapor }: { status: AppStatus; company: C
           </div>
           <div className="grid grid-cols-2 divide-x divide-[#F0EDE8]">
             {[
-              { label: "Son 5 Yıl Toplamı", toplam: y1?.toplamNet || y1?.toplam, grup: y1?.grup, secildi: tercih === "son5" },
-              { label: "En Büyük İş × 2", toplam: y2?.toplam, grup: y2?.grup, secildi: tercih === "son15" },
-            ].map(({ label, toplam, grup, secildi }) => (
-              <div key={label} className={`p-4 ${secildi ? "bg-[#C9952B]/5" : ""}`}>
+              { label: "Yöntem 1 — Son 5 Yıl", toplam: y1?.toplamNet, brut: y1?.toplamBrut, ucKat: y1?.ucKatSiniri, grup: y1?.grup, secildi: tercih === "son5", isCount: (y1?.son5YilIsler || []).length },
+              { label: "Yöntem 2 — En Büyük × 2", toplam: y2?.toplam, brut: y2?.enBuyukTutar, grup: y2?.grup, secildi: tercih === "son15", isCount: 1 },
+            ].map(({ label, toplam, brut, ucKat, grup, secildi, isCount }) => (
+              <div key={label} className={`p-4 ${secildi ? "bg-[#C9952B]/5 border-l-2 border-l-[#C9952B]" : ""}`}>
                 <p className="text-xs text-[#5A6478] mb-1">{label}</p>
-                <p className="text-base font-bold text-[#0B1D3A]">{toplam ? tlFmt(toplam) : "—"}</p>
-                <p className={`text-xs font-medium mt-0.5 ${secildi ? "text-[#C9952B]" : "text-[#5A6478]"}`}>
-                  Grup {grup || "—"} {secildi ? "✓ Kullanıldı" : ""}
+                <p className="text-lg font-bold text-[#0B1D3A]">{toplam ? tlFmt(toplam) : "—"}</p>
+                <p className={`text-xs font-medium mt-1 ${secildi ? "text-[#C9952B]" : "text-[#5A6478]"}`}>
+                  Grup {grup || "—"} {secildi ? " — Tercih edildi" : ""}
                 </p>
+                {ucKat && brut && brut !== toplam && (
+                  <p className="text-[10px] text-[#5A6478] mt-1">Brüt: {tlFmt(brut)} · 3× sınır: {tlFmt(ucKat)}</p>
+                )}
+                <p className="text-[10px] text-[#5A6478] mt-0.5">{isCount} iş kullanıldı</p>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* İş detayları */}
+      {/* İş detayları — zenginleştirilmiş */}
       {isDetaylari.length > 0 && (
         <div className="bg-white rounded-2xl border border-[#E8E4DC] overflow-hidden">
           <div className="px-5 py-3.5 bg-[#F8F7F4] border-b border-[#E8E4DC]">
-            <h3 className="text-sm font-semibold text-[#0B1D3A]">İş Deneyimi Detayları</h3>
+            <h3 className="text-sm font-semibold text-[#0B1D3A]">İş Deneyimi Detayları ({isDetaylari.length} iş)</h3>
           </div>
           <div className="divide-y divide-[#F0EDE8]">
-            {isDetaylari.map((is: any, i: number) => (
-              <div key={i} className="px-5 py-4">
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-sm font-medium text-[#0B1D3A]">
-                    {is.adaParsel || is.ada_parsel ? `Ada/Parsel: ${is.adaParsel || is.ada_parsel}` : `İş ${i + 1}`}
-                  </p>
-                  <p className="text-sm font-bold text-[#C9952B]">
-                    {(is.sonuc?.guncelTutar || is._sonuc?.guncelTutar)
-                      ? tlFmt(is.sonuc?.guncelTutar || is._sonuc?.guncelTutar) : "—"}
-                  </p>
+            {isDetaylari.map((is: any, i: number) => {
+              const s = is.sonuc || is._sonuc || {};
+              const used = isUsed(is);
+              const tipi = (is.isDeneyimiTipi || is.is_deneyimi_tipi) === "taahhut" ? "Taahhüt" : "Kat karşılığı";
+              const artisOrani = s.kullanilanKatsayi ? `${((s.kullanilanKatsayi - 1) * 100).toFixed(0)}%` : "";
+              return (
+                <div key={i} className={`px-5 py-4 ${!used ? "opacity-50" : ""}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-[#0B1D3A]">
+                        {is.adaParsel || is.ada_parsel ? `${is.adaParsel || is.ada_parsel}` : `İş ${i + 1}`}
+                      </p>
+                      <span className="text-[10px] bg-[#F0EDE8] text-[#5A6478] px-2 py-0.5 rounded-full">{tipi}</span>
+                      {used && <span className="text-[10px] bg-green-50 text-green-700 px-2 py-0.5 rounded-full">Kullanıldı</span>}
+                      {!used && <span className="text-[10px] bg-[#F0EDE8] text-[#9CA3AF] px-2 py-0.5 rounded-full">Kullanılmadı</span>}
+                    </div>
+                    <p className="text-sm font-bold text-[#C9952B]">{s.guncelTutar ? tlFmt(s.guncelTutar) : "—"}</p>
+                  </div>
+
+                  {/* Eski → Yeni değer + artış */}
+                  {s.belgeTutari && (
+                    <div className="grid grid-cols-3 gap-3 mb-2">
+                      <div className="bg-[#F8F7F4] rounded-lg p-2.5">
+                        <p className="text-[10px] text-[#5A6478]">Eski tutar</p>
+                        <p className="text-xs font-medium text-[#0B1D3A]">{tlFmt(s.belgeTutari)}</p>
+                      </div>
+                      <div className="bg-[#C9952B]/5 rounded-lg p-2.5">
+                        <p className="text-[10px] text-[#5A6478]">Güncel tutar</p>
+                        <p className="text-xs font-bold text-[#C9952B]">{tlFmt(s.guncelTutar)}</p>
+                      </div>
+                      <div className="bg-[#F8F7F4] rounded-lg p-2.5">
+                        <p className="text-[10px] text-[#5A6478]">Artış</p>
+                        <p className="text-xs font-medium text-[#0B1D3A]">{s.kullanilanKatsayi?.toFixed(2)}× ({artisOrani})</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Detay satırı */}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[#5A6478]">
+                    {(is.ruhsatSinifi || is.yapiSinifi || is.yapi_sinifi) && <span>Sınıf: {is.ymoSinifi || is.ruhsatSinifi || is.yapiSinifi || is.yapi_sinifi}</span>}
+                    {(is.insaatAlaniM2 || is.insaat_alani_m2) && <span>Alan: {is.insaatAlaniM2 || is.insaat_alani_m2} m²</span>}
+                    {(is.sozlesmeTarihi || is.sozlesme_tarihi) && <span>Sözleşme: {is.sozlesmeTarihi || is.sozlesme_tarihi}</span>}
+                    {(is.iskanTarihi || is.iskan_tarihi) && <span>İskan: {is.iskanTarihi || is.iskan_tarihi}</span>}
+                    {s.bantDurumu && <span>Yöntem: {bantLabel[s.bantDurumu] || s.bantDurumu}</span>}
+                  </div>
                 </div>
-                {(is.sonuc?.sozlesmedenBugune || is._sonuc?.sozlesmedenBugune) && (
-                  <p className="text-xs text-[#5A6478]">{is.sonuc?.sozlesmedenBugune || is._sonuc?.sozlesmedenBugune}</p>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
+        </div>
+      )}
+
+      {/* Banka referans tutarı */}
+      {bankaRef && (
+        <div className="bg-[#0B1D3A]/5 border border-[#0B1D3A]/10 rounded-xl p-4 flex items-start gap-3">
+          <Info className="w-4 h-4 text-[#0B1D3A]/50 shrink-0 mt-0.5" />
+          <p className="text-xs text-[#5A6478]">Bu grup için banka referans mektubu asgari tutarı: <strong className="text-[#0B1D3A]">{tlFmt(bankaRef)}</strong></p>
         </div>
       )}
 
       {/* Diploma */}
       {sonRapor.diploma?.grup && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-          <p className="text-xs font-semibold text-blue-700 mb-1">Diploma</p>
+          <p className="text-xs font-semibold text-blue-700 mb-1">Diploma Yöntemi</p>
           <p className="text-sm text-blue-800">{sonRapor.diploma.aciklama}</p>
+          <p className="text-xs text-blue-600 mt-1">Grup: {sonRapor.diploma.grup} · Tutar: {tlFmt(sonRapor.diploma.tutar)}</p>
         </div>
       )}
 
@@ -1308,6 +1774,7 @@ export function DashboardPage() {
   const [process, setProcess]       = useState<ProcessData | null>(null);
   const [dbDocuments, setDbDocuments] = useState<any[]>([]);
   const [sonRapor, setSonRapor]     = useState<any | null>(null);
+  const [pdfViewer, setPdfViewer]   = useState<{ url: string; name: string } | null>(null);
 
   // Wizard'dan gelen defaultTab
   useEffect(() => {
@@ -1344,8 +1811,10 @@ export function DashboardPage() {
         userEmail:   dbCompany.user_email || user.email || "",
         appStatus:   dbCompany.app_status,
         hizmetModeli: dbCompany.hizmet_modeli as any,
-        basvuruTeklifiGosterildi: dbCompany.basvuru_teklifi_gosterildi,
-        basvuruTeklifiKabul: dbCompany.basvuru_teklifi_kabul as any,
+        kepAddress:  dbCompany.kep_address || "",
+        isFirstTime: dbCompany.is_first_time || "",
+        selectedService: dbCompany.selected_service || "",
+        serviceLabel: dbCompany.service_label || "",
         partners:    dbCompany.partners as any,
         createdAt:   dbCompany.olusturulma,
         updatedAt:   dbCompany.guncelleme,
@@ -1391,6 +1860,12 @@ export function DashboardPage() {
           taahhutBedeli:      e.taahhut_bedeli?.toString() || "",
           iskanDosyaAdi:      e.iskan_dosya_adi,
           iskanDosyaUrl:      e.iskan_dosya_url,
+          // Alias fields for buildDocList & TabAnaliz
+          buildingClass:  e.yapi_sinifi,
+          buildingHeight: e.yapi_yuksekligi_m?.toString() || "",
+          contractDate:   e.sozlesme_tarihi,
+          occupancyDate:  e.iskan_tarihi,
+          totalArea:      e.insaat_alani_m2?.toString() || "",
         })),
         diploma: dip ? {
           partnerName: dip.partner_name,
@@ -1448,6 +1923,11 @@ export function DashboardPage() {
 
   const visibleTabs = useMemo(() => getTabsVisible(status, company?.group || "H"), [status, company?.group]);
 
+  const hizmetModeli: "biz_yapiyoruz" | "musteri_yapiyor" =
+    (company as any)?.hizmetModeli === "biz_yapiyoruz"
+      ? "biz_yapiyoruz"
+      : "musteri_yapiyor";
+
   // Realtime status takibi
   useEffect(() => {
     if (!company?.id) return;
@@ -1459,26 +1939,7 @@ export function DashboardPage() {
     });
   }, [company?.id]);
 
-  // Başvuru teklifi (istanbul + rapor yayınlandı)
-  const [showTeklif, setShowTeklif] = useState(false);
-  useEffect(() => {
-    if (status === "report_published" && company?.location === "istanbul" && !company?.basvuruTeklifiGosterildi) {
-      setTimeout(() => setShowTeklif(true), 800);
-    }
-  }, [status, company]);
-
-  const handleTeklif = async (kabul: boolean) => {
-    if (!company?.id) return;
-    const { supabase: sb } = await import("./supabase-client");
-    await sb.from("companies").update({
-      basvuru_teklifi_gosterildi: true,
-      basvuru_teklifi_kabul: kabul,
-      hizmet_modeli: kabul ? "biz_yapiyoruz" : "musteri_yapiyor",
-    }).eq("id", company.id);
-    setShowTeklif(false);
-    if (kabul) navigate("/paywall");
-    else refresh();
-  };
+  // Upsell teklif kaldırıldı
 
   const handleSignOut = async () => { await signOut(); navigate("/"); };
 
@@ -1570,46 +2031,19 @@ export function DashboardPage() {
 
         {/* Tab içeriği */}
         <div>
-          {activeTab === "analiz"   && company && <TabAnaliz   company={company} status={status} />}
-          {activeTab === "firma"    && company && <TabFirma    company={company} />}
+          {activeTab === "analiz"   && company && <TabAnaliz   company={company} status={status} setActiveTab={setActiveTab} />}
+          {activeTab === "firma"    && company && <TabFirma    company={company} onRefresh={refresh} status={status} setActiveTab={setActiveTab} />}
           {activeTab === "mali"     && company && <TabMali     company={company} onStatusChange={refresh} />}
           {activeTab === "odeme"    && company && <TabOdeme    company={company} invoices={invoices} />}
           {activeTab === "rapor"    && company && <TabRapor    status={status} company={company} sonRapor={sonRapor} />}
-          {activeTab === "evraklar" && company && <TabEvraklar company={company} hizmetModeli={hizmetModeli} status={status} dbDocs={dbDocuments} />}
+          {activeTab === "evraklar" && company && <TabEvraklar company={company} hizmetModeli={hizmetModeli} status={status} dbDocs={dbDocuments} onViewPdf={(url, name) => setPdfViewer({ url, name })} sonRapor={sonRapor} />}
           {activeTab === "basvuru"  && company && <TabBasvuru  company={company} hizmetModeli={hizmetModeli} process={process} />}
           {activeTab === "belge"    && company && <TabBelge    company={company} navigate={navigate} />}
         </div>
       </div>
 
-      {/* İstanbul başvuru teklifi modal */}
-      {showTeklif && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-          onClick={() => setShowTeklif(false)}>
-          <div className="bg-white rounded-2xl max-w-md w-full p-7"
-            onClick={e => e.stopPropagation()}>
-            <div className="flex items-start justify-between mb-4">
-              <h3 className="text-base font-bold text-[#0B1D3A]">Başvuruyu biz yapalım mı?</h3>
-              <button onClick={() => setShowTeklif(false)} className="text-[#5A6478] hover:text-[#0B1D3A]">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <p className="text-sm text-[#5A6478] mb-6">
-              İstanbul İl Müdürlüğü'ne başvuruyu sizin adınıza yapabiliriz.
-              Evrak hazırlama ve teslim dahil tam hizmet için fark ücret ödeyerek devam edebilirsiniz.
-            </p>
-            <div className="flex gap-3">
-              <button onClick={() => handleTeklif(false)}
-                className="flex-1 border border-[#E8E4DC] text-[#5A6478] py-2.5 rounded-xl text-sm hover:bg-[#F8F7F4] transition-colors">
-                Hayır, kendim yapacağım
-              </button>
-              <button onClick={() => handleTeklif(true)}
-                className="flex-1 bg-[#C9952B] hover:bg-[#B8862A] text-[#0B1D3A] font-medium py-2.5 rounded-xl text-sm transition-colors">
-                Evet, siz yapın
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* PDF Viewer Modal */}
+      {pdfViewer && <PdfViewer url={pdfViewer.url} fileName={pdfViewer.name} onClose={() => setPdfViewer(null)} />}
     </div>
   );
 }
