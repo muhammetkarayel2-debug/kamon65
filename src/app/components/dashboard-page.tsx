@@ -1603,7 +1603,7 @@ function TabRapor({ status, company, sonRapor }: { status: AppStatus; company: C
 }
 
 /* ── BELGE SEKMESİ ── */
-function TabBelge({ company, navigate }: { company: Company; navigate: any }) {
+function TabBelge({ company, navigate, sonRapor }: { company: Company; navigate: any; sonRapor?: any }) {
   const BELGE_KEY = "musteri_belge"; // Belge bilgileri şimdilik localStorage — ileride companies tablosuna taşınacak
   const hesaplananGrup = (company as any).hesaplananGrup || company.group || "";
 
@@ -2038,7 +2038,7 @@ export function DashboardPage() {
           {activeTab === "rapor"    && company && <TabRapor    status={status} company={company} sonRapor={sonRapor} />}
           {activeTab === "evraklar" && company && <TabEvraklar company={company} hizmetModeli={hizmetModeli} status={status} dbDocs={dbDocuments} onViewPdf={(url, name) => setPdfViewer({ url, name })} sonRapor={sonRapor} />}
           {activeTab === "basvuru"  && company && <TabBasvuru  company={company} hizmetModeli={hizmetModeli} process={process} />}
-          {activeTab === "belge"    && company && <TabBelge    company={company} navigate={navigate} />}
+          {activeTab === "belge"    && company && <TabBelge    company={company} navigate={navigate} sonRapor={sonRapor} />}
         </div>
       </div>
 

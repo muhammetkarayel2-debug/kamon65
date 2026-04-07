@@ -19,4 +19,9 @@ export default defineConfig({
 
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv', '**/*.pdf'],
+
+  // SPA routing: her URL için index.html döndür (yenileme / direkt URL'de 404 önler)
+  server: {
+    historyApiFallback: true,
+  },
 })

@@ -171,6 +171,15 @@ export function WizardPage() {
   const isKoop = companyType === "kooperatif";
   const atLeastOne = hasYapiIsi || hasDiploma || hasNone;
 
+  /* Giriş yapmış kullanıcı zaten şirketi varsa dashboard'a yönlendir */
+  useMemo(() => {
+    if (user && !isUpgrade) {
+      supabase.from("companies").select("id").eq("user_id", user.id).maybeSingle().then(({ data }) => {
+        if (data?.id) navigate("/dashboard", { replace: true });
+      });
+    }
+  }, [user?.id]);
+
   /* Prefill yükseltme — Supabase'den oku */
   useMemo(() => {
     if (upgradeId) {
