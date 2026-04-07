@@ -113,7 +113,7 @@ const mevzuatItems = [
 
 export function LandingPage() {
   const navigate = useNavigate();
-  const { user, signIn } = useAuth();
+  const { user, signIn, signOut } = useAuth() as any;
   const [showAllRefs, setShowAllRefs] = useState(false);
   const [expandedMevzuat, setExpandedMevzuat] = useState<number | null>(null);
   const [showAuth, setShowAuth] = useState(false);
@@ -163,26 +163,36 @@ export function LandingPage() {
           </div>
           <div className="flex items-center gap-3">
             {user ? (
-              <button
-                onClick={() => navigate("/dashboard")}
-                className="border border-white/20 hover:border-[#C9952B] text-white hover:text-[#C9952B] px-4 py-2 rounded-lg text-sm transition-colors flex items-center gap-2"
-              >
-                <User className="w-4 h-4" /> Panelim
-              </button>
+              <>
+                <button
+                  onClick={() => navigate("/dashboard")}
+                  className="border border-white/20 hover:border-[#C9952B] text-white hover:text-[#C9952B] px-4 py-2 rounded-lg text-sm transition-colors flex items-center gap-2"
+                >
+                  <User className="w-4 h-4" /> Panelim
+                </button>
+                <button
+                  onClick={() => { signOut(); navigate("/"); }}
+                  className="border border-white/20 hover:border-red-400 text-white/60 hover:text-red-400 px-4 py-2 rounded-lg text-sm transition-colors"
+                >
+                  Çıkış Yap
+                </button>
+              </>
             ) : (
-              <button
-                onClick={() => setShowAuth(true)}
-                className="border border-white/20 hover:border-[#C9952B] text-white hover:text-[#C9952B] px-4 py-2 rounded-lg text-sm transition-colors flex items-center gap-2"
-              >
-                <User className="w-4 h-4" /> Giriş Yap
-              </button>
+              <>
+                <button
+                  onClick={() => setShowAuth(true)}
+                  className="border border-white/20 hover:border-[#C9952B] text-white hover:text-[#C9952B] px-4 py-2 rounded-lg text-sm transition-colors flex items-center gap-2"
+                >
+                  <User className="w-4 h-4" /> Giriş Yap
+                </button>
+                <button
+                  onClick={() => navigate("/wizard")}
+                  className="bg-[#C9952B] hover:bg-[#B8862A] text-[#0B1D3A] px-5 py-2 rounded-lg text-sm transition-colors"
+                >
+                  Hemen Başla
+                </button>
+              </>
             )}
-            <button
-              onClick={() => navigate("/wizard")}
-              className="bg-[#C9952B] hover:bg-[#B8862A] text-[#0B1D3A] px-5 py-2 rounded-lg text-sm transition-colors"
-            >
-              Hemen Başla
-            </button>
           </div>
         </div>
       </nav>
@@ -202,10 +212,10 @@ export function LandingPage() {
             <h1 className="text-3xl sm:text-4xl md:text-5xl text-white leading-tight mb-6">Müteahhitlik Belgesi Başvurunuzu<br /><span className="text-[#C9952B]">Profesyonel Ekiple</span> Tamamlayın</h1>
             <p className="text-white/70 text-lg mb-10 max-w-lg"><span className="font-bold">Bakanlık süreçleri ve evrak trafiğiyle boğuşmayın.</span> Uzman analizimle hatalı harç ödemelerini engelleyelim, başvurunuzu yasal mevzuata tam uyumlu şekilde sonuçlandıralım.</p>
             <button
-              onClick={() => navigate("/wizard")}
+              onClick={() => navigate(user ? "/dashboard" : "/wizard")}
               className="bg-[#C9952B] hover:bg-[#B8862A] text-[#0B1D3A] px-10 py-4 rounded-xl text-base flex items-center justify-center gap-2 transition-colors"
             >
-              Analize Başla <ArrowRight className="w-5 h-5" />
+              {user ? "Panelime Git" : "Analize Başla"} <ArrowRight className="w-5 h-5" />
             </button>
           </div>
         </div>

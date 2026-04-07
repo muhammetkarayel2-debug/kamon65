@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router";
 import {
   ArrowLeft, ArrowRight, AlertTriangle, Award, Plus, Trash2,
@@ -139,6 +139,17 @@ export function WizardPage() {
   const [authErr, setAuthErr] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
+  /* Auth formu gösterilince otomatik kaydır */
+  const authRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (showAuth) {
+      setTimeout(() => {
+        authRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    }
+  }, [showAuth]);
+
   /* Firma */
   const [companyName, setCompanyName] = useState("");
   const [taxId, setTaxId] = useState("");
@@ -237,6 +248,7 @@ export function WizardPage() {
       if (!atLeastOne) errs.push("En az bir başvuru türü seçiniz");
       if (hasYapiIsi) exps.forEach((e, i) => {
         if (!e.sozlesmeTarihi) errs.push(`İş ${i + 1}: Sözleşme tarihi`);
+        if (!e.iskanTarihi) errs.push(`İş ${i + 1}: İskan tarihi`);
         if (e.iskanTarihi && e.sozlesmeTarihi && new Date(e.sozlesmeTarihi) > new Date(e.iskanTarihi)) errs.push(`İş ${i + 1}: Sözleşme tarihi iskan tarihinden büyük olamaz`);
         if (!e.iskanFile) errs.push(`İş ${i + 1}: İskan belgesi`);
         if (e.isDeneyimiTipi === "kat_karsiligi") {
@@ -372,9 +384,11 @@ export function WizardPage() {
   }
 
   async function handleAuth() {
-    if (!authEmail || !authPass || authPass.length < 6 || authPass !== authPass2) {
-      setAuthErr("Bilgileri kontrol edin."); return;
-    }
+    if (!authEmail) { setAuthErr("E-posta adresi zorunludur."); return; }
+    if (!authPass) { setAuthErr("Lütfen şifre belirleyin."); return; }
+    if (authPass.length < 6) { setAuthErr("Şifre en az 6 karakter olmalıdır."); return; }
+    if (!authPass2) { setAuthErr("Şifreyi tekrar giriniz."); return; }
+    if (authPass !== authPass2) { setAuthErr("Şifreler eşleşmiyor."); return; }
     setAuthErr(""); setAuthLoading(true);
     try {
       /* E-posta ile kayıt */
@@ -474,7 +488,7 @@ export function WizardPage() {
         {/* İçerik */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
           {/* Kaydırılabilir içerik alanı */}
-          <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+          <div ref={scrollContainerRef} style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
           <div style={{ padding: "36px 48px", maxWidth: 820 }}>
 
             {/* Hata banner */}
@@ -645,8 +659,8 @@ export function WizardPage() {
                     <div style={{ fontSize: 11, fontWeight: 500, color: "#C9952B", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>Başvuru türü<div style={{ flex: 1, height: 1, background: "rgba(201,149,43,0.2)" }} /></div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {[
-                        { k: "yapiIsi", checked: hasYapiIsi, set: () => { setHasYapiIsi(!hasYapiIsi); if (!hasYapiIsi) setHasNone(false); }, l: "Yapım işim var", s: "Tamamlanan inşaat projelerim var" },
-                        { k: "diploma", checked: hasDiploma, set: () => { setHasDiploma(!hasDiploma); if (!hasDiploma) { setHasNone(false); if (companyType === "sahis") setDipName(companyName); } }, l: "Diploma başvurusu", s: "Ortağın/sahibin diplomasıyla başvuru" },
+                        { k: "yapiIsi", checked: hasYapiIsi, set: () => { setHasYapiIsi(!hasYapiIsi); if (!hasYapiIsi) { setHasNone(false); if (isHGrubu) handleHGrubuToggle(false); } }, l: "Yapım işim var", s: "Tamamlanan inşaat projelerim var" },
+                        { k: "diploma", checked: hasDiploma, set: () => { setHasDiploma(!hasDiploma); if (!hasDiploma) { setHasNone(false); if (isHGrubu) handleHGrubuToggle(false); if (companyType === "sahis") setDipName(companyName); } }, l: "Diploma başvurusu", s: "Ortağın/sahibin diplomasıyla başvuru" },
                         { k: "none", checked: hasNone, set: () => { const n = !hasNone; setHasNone(n); if (n) { setHasYapiIsi(false); setHasDiploma(false); handleHGrubuToggle(true); } else { handleHGrubuToggle(false); } }, l: "Belge / iş deneyimim yok", s: "H grubu yetki belgesi başvurusu yapacağım" },
                       ].map(({ k, checked, set, l, s }) => (
                         <button key={k} onClick={set} style={{ padding: "12px 14px", borderRadius: 10, border: `1px solid ${checked ? "#C9952B" : "rgba(11,29,58,0.1)"}`, background: checked ? "rgba(201,149,43,0.08)" : "white", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "flex-start", gap: 10 }}>
@@ -666,8 +680,8 @@ export function WizardPage() {
                   const taahhutExps = exps.filter(e => e.isDeneyimiTipi === "taahhut");
 
                   const isExpComplete = (e: typeof exps[0]) => {
-                    if (e.isDeneyimiTipi === "taahhut") return !!(e.sozlesmeTarihi && e.taahhutBedeli && e.iskanFile);
-                    return !!(e.sozlesmeTarihi && e.insaatAlaniM2 && e.yapiSinifi && e.iskanFile);
+                    if (e.isDeneyimiTipi === "taahhut") return !!(e.sozlesmeTarihi && e.iskanTarihi && e.taahhutBedeli && e.iskanFile);
+                    return !!(e.sozlesmeTarihi && e.iskanTarihi && e.insaatAlaniM2 && e.yapiSinifi && e.iskanFile);
                   };
                   const canAddNew = (list: typeof exps) => list.length === 0 || list.every(isExpComplete);
 
@@ -1080,7 +1094,7 @@ export function WizardPage() {
 
                 {/* Hesap oluşturma — wizard akışının devamı */}
                 {showAuth && (
-                  <div style={{ marginTop: 20 }}>
+                  <div ref={authRef} style={{ marginTop: 20 }}>
                     <div style={{ fontSize: 11, fontWeight: 500, color: "#C9952B", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>Hesap bilgileri<div style={{ flex: 1, height: 1, background: "rgba(201,149,43,0.2)" }} /></div>
                     <p style={{ fontSize: 12, color: "#5A6478", margin: "0 0 14px" }}>Başvurunuzu takip edebilmeniz için bir hesap oluşturun.</p>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
